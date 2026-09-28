@@ -1,0 +1,81 @@
+name: Create a SemVer Release from PR Label
+on: 
+  push:
+    branches:
+      - main
+      - master
+jobs:
+  bump-tag-version:
+    name: Bump and Tag Version
+    runs-on: ubuntu-latest
+    outputs: 
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        
+      - name: Bump and Tag Version
+        uses: jefflinse/pr-semver-bump@v1.6.0
+        id: bump
+        with:
+          mode: bump
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          with-v: true
+      - name: Create Release
+        uses: actions/create-release@v1
+        if: ${{ success() }}
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ steps.bump.outputs.version }}
+          release_name: Release ${{ steps.bump.outputs.version }}
+          body: ${{ steps.bump.outputs.release-notes }}
+          draft: false
+          prerelease: false
+
+  build:
+    name: Build
+    needs: bump-tag-version
+    runs-on: ubuntu-latest  
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Use Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '20.x'
+
+    - name: Update Version
+      uses: reedyuk/npm-version@1.1.1
+      with:
+        version: ${{ needs.bump-tag-version.outputs.version }}
+
+    - name: Install Vite
+      run: npm install -D vite
+
+    - name: Build
+      run: npm run build -- --base=/${{ github.event.repository.name }}/
+        
+    - name: Upload production-ready build files
+      uses: actions/upload-pages-artifact@v3
+      with:
+        id: deployment
+        path: ./dist
+
+  deploy:
+      name: Deploy to GitHub Pages
+      needs: build
+      runs-on: ubuntu-latest
+      environment:
+        name: github-pages
+        url: ${{steps.deployment.outputs.page_url}}
+      permissions:
+        contents: read
+        pages: write
+        id-token: write
+      steps:
+        - name: Deploy to GitHub Pages
+          id: deployment
+          uses: actions/deploy-pages@v4

@@ -51,10 +51,18 @@ reason (Vite's HTML proxy fails on the resolved path).
 
 ## Deploying
 
-`npm run build` writes a static site to `dist/` with relative asset paths. Host it on HTTPS and
-add the URL as a web widget on an ftrack dashboard. Opened outside ftrack, the build only shows a
-short note on how to add it.
+Same setup as ftrack-360-player: `.github/workflows/deploy.yml` runs on every push to `main`. It
+bumps the version from the merged PR's semver label (`jefflinse/pr-semver-bump`), creates a GitHub
+release, builds with `--base=/<repo name>/` and deploys `dist/` to GitHub Pages:
 
+    https://<org>.github.io/ftrack-shot-tracker/
+
+Add that URL as a web widget on an ftrack dashboard. In the repository settings, set Pages'
+source to **GitHub Actions** and allow `main` in the `github-pages` environment.
+
+`npm run build` locally writes the same static site with relative asset paths, so `dist/` can
+also be served from any HTTPS location. Opened outside ftrack, the build only shows a short note
+on how to add it.
 ## When the widget cannot connect
 
 ftrack hands the widget its API credentials over `postMessage`, and the widget's API calls rely
