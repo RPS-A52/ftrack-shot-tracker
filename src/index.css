@@ -1,0 +1,11 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+/* The widget is an iframe on a scrolling dashboard: never let our own scroll chain to it,
+   and never show a page-level scrollbar (each panel scrolls on its own). */
+html, body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
