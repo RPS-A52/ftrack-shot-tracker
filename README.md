@@ -63,6 +63,16 @@ source to **GitHub Actions** and allow `main` in the `github-pages` environment.
 `npm run build` locally writes the same static site with relative asset paths, so `dist/` can
 also be served from any HTTPS location. Opened outside ftrack, the build only shows a short note
 on how to add it.
+
+### Releasing
+
+Every change reaches `main` through a pull request carrying exactly one of the labels `major`,
+`minor` or `patch`; that label decides the next version tag. Merging the PR runs the workflow.
+
+Do not push to `main` directly. The version step looks up the merged PR behind each commit on
+`main`, and a direct push fails the run with "Failed to find PR by commit SHA" (nothing is
+released or deployed). Put the change on a branch and open a PR instead.
+
 ## When the widget cannot connect
 
 ftrack hands the widget its API credentials over `postMessage`, and the widget's API calls rely
