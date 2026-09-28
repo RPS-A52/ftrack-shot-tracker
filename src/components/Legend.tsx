@@ -5,17 +5,15 @@
 import { Box, ButtonBase, Tooltip, useMediaQuery } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import type { Aggregate } from '../data/aggregate';
-import { formatPercent, formatValue } from '../data/aggregate';
-import type { Measure } from '../data/types';
+import { formatCount, formatPercent } from '../data/aggregate';
 
 interface Props {
   agg: Aggregate;
-  measure: Measure;
   hidden: Set<string>;
   onToggle: (key: string) => void;
 }
 
-export default function Legend({ agg, measure, hidden, onToggle }: Props) {
+export default function Legend({ agg, hidden, onToggle }: Props) {
   // Short dashboard tiles get one row that scrolls sideways instead of a wrapped block.
   const compact = useMediaQuery('(max-height: 440px)');
   if (agg.series.length === 0) return null;
@@ -61,7 +59,7 @@ export default function Legend({ agg, measure, hidden, onToggle }: Props) {
                 <Box component="span" sx={{ width: 10, height: 10, borderRadius: '3px', bgcolor: s.color, flexShrink: 0, ...(off && { bgcolor: 'transparent', border: `2px solid ${s.color}` }) }} />
                 <Box component="span" sx={{ color: 'text.primary', textDecoration: off ? 'line-through' : 'none', whiteSpace: 'nowrap' }}>{s.label}</Box>
                 <Box component="span" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatValue(value, measure)}
+                  {formatCount(value)}
                   {agg.total > 0 && ` · ${formatPercent(value / agg.total)}`}
                 </Box>
               </ButtonBase>

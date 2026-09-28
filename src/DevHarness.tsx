@@ -1,6 +1,7 @@
 // Development-only: runs the widget outside ftrack. Only mounted by main.tsx under
 // `vite` (import.meta.env.DEV). Query parameters:
 //   ?shots=<n>           size of the fake project (default 36; 0 for an empty one)
+//   ?shot                point the widget at a single shot instead of the project
 //   ?theme=light         ftrack's light theme (dark by default)
 //   ?fail=<message>      make every query fail
 //   ?error=session|timeout|not-embedded   show the loading error page instead
@@ -58,7 +59,9 @@ function HarnessApp() {
   const [failure, setFailure] = useState<string | null>(null);
   const entity = useMemo(() => real
     ? { id: env.VITE_FTRACK_ENTITY_ID as string, type: (env.VITE_FTRACK_ENTITY_TYPE as string) || 'Project' }
-    : { id: 'mock-project', type: 'Project' }, [real, env]);
+    : new URLSearchParams(window.location.search).has('shot')
+      ? { id: 'shot-0', type: 'Shot' }
+      : { id: 'mock-project', type: 'Project' }, [real, env]);
 
   useEffect(() => {
     if (!real) return;

@@ -7,13 +7,10 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import DonutLargeIcon from '@mui/icons-material/DonutLarge';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TuneIcon from '@mui/icons-material/Tune';
-import type { Breakdown, ChartKind, GroupBy, Measure, SortBy } from '../data/types';
-import { GROUP_LABELS } from '../data/types';
+import type { Breakdown, ChartKind, SortBy } from '../data/types';
 
 export interface ViewSettings {
   chart: ChartKind;
-  groupBy: GroupBy;
-  measure: Measure;
   breakdown: Breakdown;
   sortBy: SortBy;
   normalize: boolean;
@@ -22,17 +19,17 @@ export interface ViewSettings {
 interface Props {
   settings: ViewSettings;
   onChange: (patch: Partial<ViewSettings>) => void;
-  /** Bid hours only exist on tasks. */
-  bidAvailable: boolean;
+  /** Sorting only applies to the shot list. */
+  hasShotList: boolean;
   loading: boolean;
   onRefresh: () => void;
 }
 
 const SORT_LABELS: Record<SortBy, string> = {
-  default: 'Default order',
-  name: 'Name',
+  default: 'Sequence order',
+  name: 'Shot name',
   progress: 'Most complete first',
-  total: 'Largest first',
+  total: 'Most assets first',
 };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -44,7 +41,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function Toolbar({ settings, onChange, bidAvailable, loading, onRefresh }: Props) {
+export default function Toolbar({ settings, onChange, hasShotList, loading, onRefresh }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   return (
@@ -57,8 +54,8 @@ export default function Toolbar({ settings, onChange, bidAvailable, loading, onR
         aria-label="Chart type"
       >
         {/* MUI v6 ToggleButtonGroup passes state by context, so a Tooltip wrapper is fine. */}
-        <Tooltip title="Bar chart">
-          <ToggleButton value="bar" aria-label="Bar chart">
+        <Tooltip title="Bar charts">
+          <ToggleButton value="bar" aria-label="Bar charts">
             <BarChartIcon fontSize="small" sx={{ transform: 'rotate(90deg) scaleX(-1)' }} />
           </ToggleButton>
         </Tooltip>
@@ -68,19 +65,7 @@ export default function Toolbar({ settings, onChange, bidAvailable, loading, onR
           </ToggleButton>
         </Tooltip>
       </ToggleButtonGroup>
-
-      <Select
-        size="small"
-        value={settings.groupBy}
-        onChange={(e) => onChange({ groupBy: e.target.value as GroupBy })}
-        inputProps={{ 'aria-label': 'Group by' }}
-        renderValue={(v) => <><Box component="span" sx={{ color: 'text.secondary' }}>By </Box>{GROUP_LABELS[v].toLowerCase()}</>}
-        sx={{ minWidth: 132, '& .MuiSelect-select': { py: 0.6 } }}
-      >
-        {(Object.keys(GROUP_LABELS) as GroupBy[]).map((g) => (
-          <MenuItem key={g} value={g}>{GROUP_LABELS[g]}</MenuItem>
-        ))}
-      </Select>
+      <Typography variant="body2" color="text.secondary" noWrap>by asset type</Typography>
 
       <Box sx={{ flex: 1 }} />
 
@@ -106,18 +91,6 @@ export default function Toolbar({ settings, onChange, bidAvailable, loading, onR
         slotProps={{ paper: { sx: { p: 2, width: 260, maxWidth: 'calc(100vw - 16px)', maxHeight: 'calc(100vh - 16px)', overflowY: 'auto', border: 1, borderColor: 'divider' } } }}
       >
         <Stack spacing={2}>
-          <Section title="Measure">
-            <ToggleButtonGroup size="small" exclusive fullWidth value={bidAvailable ? settings.measure : 'count'}
-              onChange={(_e, v: Measure | null) => v && onChange({ measure: v })}>
-              <ToggleButton value="bid" disabled={!bidAvailable}>Bid hours</ToggleButton>
-              <ToggleButton value="count">Count</ToggleButton>
-            </ToggleButtonGroup>
-            {!bidAvailable && (
-              <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
-                Asset types count latest versions, which have no bid.
-              </Typography>
-            )}
-          </Section>
           <Section title="Colour by">
             <ToggleButtonGroup size="small" exclusive fullWidth value={settings.breakdown}
               onChange={(_e, v: Breakdown | null) => v && onChange({ breakdown: v })}>
@@ -128,9 +101,9 @@ export default function Toolbar({ settings, onChange, bidAvailable, loading, onR
               State groups statuses into not started, in progress, blocked and done.
             </Typography>
           </Section>
-          <Section title="Sort">
-            <Select size="small" fullWidth value={settings.sortBy} onChange={(e) => onChange({ sortBy: e.target.value as SortBy })}
-              MenuProps={{ disablePortal: true }}>
+          <Section title="Sort shots">
+            <Select size="small" fullWidth value={settings.sortBy} disabled={!hasShotList}
+              onChange={(e) => onChange({ sortBy: e.target.value as SortBy })} MenuProps={{ disablePortal: true }}>
               {(Object.keys(SORT_LABELS) as SortBy[]).map((s) => <MenuItem key={s} value={s}>{SORT_LABELS[s]}</MenuItem>)}
             </Select>
           </Section>

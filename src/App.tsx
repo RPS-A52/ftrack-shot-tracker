@@ -7,26 +7,24 @@ import { alpha, useTheme } from '@mui/material/styles';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import type { QuerySession } from './data/fetchProgress';
 import { UnsupportedScopeError } from './data/fetchProgress';
-import { aggregate, formatPercent, formatValue, type GroupRow } from './data/aggregate';
-import { GROUP_LABELS, sourceFor, type ProgressData } from './data/types';
-import { isBool, oneOf, useFtrackEntity, useProgressData, usePersistentState, type EntityRef } from './hooks';
+import { aggregate, buildSeries, formatCount, formatPercent, summariseShots, type Aggregate } from './data/aggregate';
+import type { GroupRef, ProgressData } from './data/types';
+import { isBool, oneOf, useFtrackEntity, useProgressData, usePersistentState, type EntityRef, type LoadState } from './hooks';
 import Toolbar, { type ViewSettings } from './components/Toolbar';
 import Legend from './components/Legend';
 import BarView from './components/BarView';
 import PieView from './components/PieView';
+import ShotList from './components/ShotList';
 
 const DEFAULTS: ViewSettings = {
   chart: 'bar',
-  groupBy: 'taskType',
-  measure: 'bid',
   breakdown: 'status',
   sortBy: 'default',
   normalize: false,
 };
 const isSettings = (v: unknown): v is ViewSettings => {
   const s = v as ViewSettings;
-  return Boolean(s) && oneOf('bar', 'pie')(s.chart) && oneOf('taskType', 'shot', 'assetType')(s.groupBy)
-    && oneOf('bid', 'count')(s.measure) && oneOf('status', 'state')(s.breakdown)
+  return Boolean(s) && oneOf('bar', 'pie')(s.chart) && oneOf('status', 'state')(s.breakdown)
     && oneOf('default', 'name', 'progress', 'total')(s.sortBy) && isBool(s.normalize);
 };
 
@@ -39,27 +37,29 @@ interface Props {
 export default function App({ session, entity: fixedEntity }: Props) {
   const entity = useFtrackEntity(fixedEntity);
   const { state, reload } = useProgressData(session, entity);
-  const [settings, setSettings] = usePersistentState('settings', DEFAULTS, isSettings);
+  const [stored, setSettings] = usePersistentState('settings', DEFAULTS, isSettings);
+  // Older saved settings may carry fields this version no longer has.
+  const settings: ViewSettings = { chart: stored.chart, breakdown: stored.breakdown, sortBy: stored.sortBy, normalize: stored.normalize };
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusId, setFocusId] = useState<string | null>(null);
 
   const data = 'data' in state ? state.data : undefined;
-  const source = sourceFor(settings.groupBy);
-  const bidAvailable = source === 'tasks';
-  const measure = bidAvailable ? settings.measure : 'count';
-
-  const agg = useMemo(() => data && aggregate(data[source], {
-    groupBy: settings.groupBy,
-    measure,
-    breakdown: settings.breakdown,
-    sortBy: settings.sortBy,
-  }), [data, source, settings.groupBy, settings.breakdown, settings.sortBy, measure]);
+  const { breakdown, sortBy } = settings;
+  const view = useMemo(() => {
+    if (!data) return undefined;
+    const series = buildSeries(data.versions, breakdown);
+    return {
+      overall: aggregate(data.versions, series, breakdown),
+      shots: summariseShots(data.versions, series, breakdown, sortBy),
+    };
+  }, [data, breakdown, sortBy]);
+  // A folder, sequence or project with several shots gets the per-shot list.
+  const showShotList = Boolean(view && view.shots.length > 1);
 
   const change = useCallback((patch: Partial<ViewSettings>) => {
     setSettings((s) => ({ ...s, ...patch }));
-    // Series and groups change meaning with these, so start from a clean slate.
-    if (patch.breakdown || patch.groupBy) setHidden(new Set());
-    if (patch.groupBy) setFocusId(null);
+    // Series change meaning with the breakdown, so start from a clean slate.
+    if (patch.breakdown) setHidden(new Set());
   }, [setSettings]);
 
   const toggleSeries = (key: string) => setHidden((prev) => {
@@ -68,17 +68,16 @@ export default function App({ session, entity: fixedEntity }: Props) {
     return next;
   });
 
-  // Only shots (and other parents) are entities worth opening; task and asset types are not.
-  const openInFtrack = settings.groupBy === 'shot' && !fixedEntity
-    ? (row: GroupRow) => { try { ftrackWidget.openSidebar(row.ref.entityType ?? 'TypedContext', row.ref.id); } catch (e) { console.error(e); } }
-    : undefined;
+  const openInFtrack = fixedEntity
+    ? undefined
+    : (ref: GroupRef) => { try { ftrackWidget.openSidebar(ref.entityType ?? 'TypedContext', ref.id); } catch (e) { console.error(e); } };
 
   return (
     <Box component="main" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary', overflow: 'hidden' }}>
       <Box sx={{ position: 'relative', px: 1.5, pt: 1.25, pb: 1, display: 'flex', flexDirection: 'column', gap: 1, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
-        {(data || state.status === 'loading') && <Header data={data} agg={agg} measure={measure} />}
-        <Toolbar settings={settings} onChange={change} bidAvailable={bidAvailable} loading={state.status === 'loading'} onRefresh={reload} />
-        {agg && <Legend agg={agg} measure={measure} hidden={hidden} onToggle={toggleSeries} />}
+        {(data || state.status === 'loading') && <Header data={data} agg={view?.overall} shotCount={view?.shots.length ?? 0} />}
+        <Toolbar settings={settings} onChange={change} hasShotList={showShotList} loading={state.status === 'loading'} onRefresh={reload} />
+        {view && <Legend agg={view.overall} hidden={hidden} onToggle={toggleSeries} />}
         {state.status === 'loading' && data && (
           <LinearProgress sx={{ position: 'absolute', left: 0, right: 0, bottom: -1, height: 2 }} />
         )}
@@ -88,9 +87,9 @@ export default function App({ session, entity: fixedEntity }: Props) {
         <Body
           state={state}
           entity={entity}
-          agg={agg}
+          view={view}
+          showShotList={showShotList}
           settings={settings}
-          measure={measure}
           hidden={hidden}
           focusId={focusId}
           onFocus={setFocusId}
@@ -103,7 +102,7 @@ export default function App({ session, entity: fixedEntity }: Props) {
   );
 }
 
-function Header({ data, agg, measure }: { data?: ProgressData; agg?: ReturnType<typeof aggregate>; measure: ViewSettings['measure'] }) {
+function Header({ data, agg, shotCount }: { data?: ProgressData; agg?: Aggregate; shotCount: number }) {
   const theme = useTheme();
   if (!data || !agg) {
     return <Stack spacing={0.5}><Skeleton width="40%" height={22} /><Skeleton height={6} variant="rounded" /></Stack>;
@@ -114,16 +113,18 @@ function Header({ data, agg, measure }: { data?: ProgressData; agg?: ReturnType<
         <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, minWidth: 0 }} title={data.scope.name}>
           {data.scope.name}
         </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>{data.scope.type}</Typography>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>
+          {data.scope.type}{shotCount > 1 && ` · ${formatCount(shotCount)} shots`}
+        </Typography>
         <Box sx={{ flex: 1 }} />
         <Typography variant="body2" noWrap sx={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
           <b>{formatPercent(agg.progress)}</b>
           <Box component="span" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
-            {' '}done · {formatValue(agg.done, measure)} of {formatValue(agg.total, measure)}
+            {' '}done · {formatCount(agg.done)} of {formatCount(agg.total)} assets
           </Box>
         </Typography>
       </Stack>
-      <Tooltip title={`${formatPercent(agg.progress)} of ${measure === 'bid' ? 'bid hours' : 'items'} are in a done status`}>
+      <Tooltip title={`${formatPercent(agg.progress)} of assets have their latest version in a done status`}>
         <LinearProgress
           variant="determinate"
           value={agg.progress * 100}
@@ -132,7 +133,7 @@ function Header({ data, agg, measure }: { data?: ProgressData; agg?: ReturnType<
         />
       </Tooltip>
       {data.truncated && (
-        <Typography variant="caption" color="warning.main">Very large scope: only the first 50,000 items are counted.</Typography>
+        <Typography variant="caption" color="warning.main">Very large scope: only the first 50,000 versions are counted.</Typography>
       )}
     </Stack>
   );
@@ -152,22 +153,22 @@ function EmptyState({ title, children, action }: { title: string; children?: Rea
 }
 
 function Body(props: {
-  state: ReturnType<typeof useProgressData>['state'];
+  state: LoadState;
   entity: EntityRef | null;
-  agg?: ReturnType<typeof aggregate>;
+  view?: { overall: Aggregate; shots: ReturnType<typeof summariseShots> };
+  showShotList: boolean;
   settings: ViewSettings;
-  measure: ViewSettings['measure'];
   hidden: Set<string>;
   focusId: string | null;
   onFocus: (id: string | null) => void;
-  onOpen?: (row: GroupRow) => void;
+  onOpen?: (ref: GroupRef) => void;
   onReload: () => void;
   onChange: (patch: Partial<ViewSettings>) => void;
 }) {
-  const { state, entity, agg, settings, measure, hidden, focusId, onFocus, onOpen, onReload, onChange } = props;
+  const { state, entity, view, showShotList, settings, hidden, focusId, onFocus, onOpen, onReload, onChange } = props;
 
   if (!entity) {
-    return <EmptyState title="Nothing selected">Open this widget on a project, sequence, shot or list to see its progress.</EmptyState>;
+    return <EmptyState title="Nothing selected">Open this widget on a project, folder, sequence, shot or list to see its progress.</EmptyState>;
   }
   if (state.status === 'error' && !state.data) {
     if (state.error instanceof UnsupportedScopeError) {
@@ -189,7 +190,7 @@ function Body(props: {
       </Box>
     );
   }
-  if (!agg) {
+  if (!view) {
     return (
       <Stack spacing={1.25} sx={{ p: 2 }}>
         {[72, 55, 88, 40, 64].map((w, i) => (
@@ -208,28 +209,12 @@ function Body(props: {
     </Alert>
   );
 
-  if (agg.rows.length === 0) {
-    const what = settings.groupBy === 'assetType' ? 'published versions' : 'tasks';
+  if (view.overall.total === 0) {
     return (
       <>
         {staleError}
-        <EmptyState
-          title={`No ${what} here`}
-          action={settings.groupBy === 'assetType'
-            ? <Button size="small" onClick={() => onChange({ groupBy: 'taskType' })}>Show tasks instead</Button>
-            : undefined}
-        >
-          There are no {what} under this {state.status === 'ready' ? state.data.scope.type.toLowerCase() : 'entity'} yet.
-        </EmptyState>
-      </>
-    );
-  }
-  if (measure === 'bid' && agg.total === 0) {
-    return (
-      <>
-        {staleError}
-        <EmptyState title="No bids entered" action={<Button size="small" variant="outlined" onClick={() => onChange({ measure: 'count' })}>Count tasks instead</Button>}>
-          None of these {agg.count} tasks has a bid, so there are no hours to chart.
+        <EmptyState title="No published versions here">
+          Nothing has been published under this {state.status === 'ready' ? state.data.scope.type.toLowerCase() : 'entity'} yet.
         </EmptyState>
       </>
     );
@@ -238,24 +223,24 @@ function Body(props: {
   return (
     <>
       {staleError}
-      {settings.chart === 'bar' ? (
+      {showShotList ? (
+        <ShotList
+          shots={view.shots}
+          overall={view.overall}
+          chart={settings.chart}
+          normalize={settings.normalize}
+          hidden={hidden}
+          onOpen={onOpen}
+        />
+      ) : settings.chart === 'bar' ? (
         <BarView
-          agg={agg}
-          measure={measure}
+          agg={view.overall}
           normalize={settings.normalize}
           hidden={hidden}
           onRowClick={(row) => { onFocus(row.ref.id); onChange({ chart: 'pie' }); }}
         />
       ) : (
-        <PieView
-          agg={agg}
-          measure={measure}
-          hidden={hidden}
-          groupLabel={GROUP_LABELS[settings.groupBy]}
-          focusId={focusId}
-          onFocus={onFocus}
-          onOpen={onOpen}
-        />
+        <PieView agg={view.overall} hidden={hidden} focusId={focusId} onFocus={onFocus} />
       )}
     </>
   );

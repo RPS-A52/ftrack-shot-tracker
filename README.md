@@ -1,19 +1,22 @@
 # ftrack-shot-tracker
 
-An ftrack dashboard widget that charts progress under the selected project, sequence, shot or list:
-stacked bars or donuts, broken down by status.
+An ftrack dashboard widget that charts progress of the latest version of every asset under the
+selected project, folder, sequence, shot or list, by asset type and status, as stacked bars or
+donuts.
 
-- **Group by**: task type, shot (the task's parent), or asset type (the latest version of each asset).
-- **Measure**: bid hours (ftrack stores bids in seconds; shown in hours) or item count. Asset types
-  are always counted, as versions have no bid.
+- **Several shots** under the selection (a folder, sequence or project): a scrolling list with one
+  card per shot, each showing that shot's asset types, its sequence and its % done, under an
+  **All shots** summary. The search box filters by shot or sequence name (every word must match;
+  Esc clears). The list is virtualised with [react-virtuoso](https://virtuoso.dev/), so only the
+  cards on screen are rendered.
+- **One shot**: its asset types full size. In bar mode, click a row to open its donut.
 - **Colour by**: each workflow status in its ftrack colour, or the four states (not started,
   in progress, blocked, done).
-- **Progress** is the share of bid hours (or items) whose status is in the *Done* state.
+- **Progress** is the share of assets whose latest version is in a *Done*-state status.
 
-Click a legend entry to hide that status. In bar mode, click a row to open its donut. In pie mode,
-click a card to focus it; for shots, **Open in ftrack** opens the sidebar. Display options (gear
-icon) are remembered per browser when storage is available.
-
+Click a legend entry to hide that status. **Open in ftrack** on a shot card opens its sidebar.
+Display options (the sliders icon: colours, shot sort order, 100% bars) are remembered per browser
+when storage is available. Bars in the shot cards share one scale, so shots compare at a glance.
 Charts are [MUI X Charts](https://mui.com/x/react-charts/) (free tier) on MUI 6, the same UI stack
 as our other widgets.
 
@@ -32,6 +35,7 @@ Opened directly (not in an iframe), the dev server mounts a harness with a mock 
 | URL parameter | Effect |
 |---|---|
 | `?shots=120` | size of the fake project (`0` for an empty one) |
+| `?shot` | point the widget at a single shot |
 | `?theme=light` | ftrack's light theme |
 | `?embed&w=440&h=330` | run inside an iframe of that size, like a small dashboard tile |
 | `?fail=<message>` | make every query fail |
@@ -62,13 +66,17 @@ the browser supports it. Queries that later fail with 401/403 show the same advi
 
 ## Data
 
-`src/data/fetchProgress.ts` loads everything once per selection (paged, 1000 rows per query,
-capped at 50 000 rows per source with a warning), and `src/data/aggregate.ts` builds the chart
-rows client side, so the toolbar never waits on the server. Answers for a previous selection
-are discarded when the selection changes quickly.
+`src/data/fetchProgress.ts` loads the latest version of every asset under the selection once
+(paged, 1000 rows per query, capped at 50 000 with a warning), plus each shot's parent name (its
+sequence, from `link`) to tell apart shots with the same name. `src/data/aggregate.ts` builds the
+chart rows client side, so the toolbar and search never wait on the server. Answers for a previous
+selection are discarded when the selection changes quickly.
 
-| Selected entity | Tasks | Latest versions |
-|---|---|---|
-| Project | `project_id` | `project_id` (or `asset.parent` when the schema lacks it) |
-| Sequence, shot, task, folder… | the entity and its descendants | assets on it or under it, or published from the task |
-| List | the listed entities and their descendants | same; an AssetVersionList counts its versions |
+A "shot" is whatever entity the asset is published on: usually a shot, but an asset build or a
+sequence shows up the same way, labelled with its type.
+
+| Selected entity | Versions counted |
+|---|---|
+| Project | `project_id` (or `asset.parent` when the schema lacks it) |
+| Folder, sequence, shot, task… | assets on it or under it, or published from the task |
+| List | assets on or under the listed entities; an AssetVersionList counts its versions |

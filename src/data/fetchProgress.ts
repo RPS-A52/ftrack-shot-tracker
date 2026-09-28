@@ -1,8 +1,8 @@
-// Loads the tasks and latest versions under the entity the widget is pointed at.
-// Everything is fetched once per scope; switching chart, grouping or measure is done
-// client side (aggregate.ts), so the toolbar never waits on the server.
+// Loads the latest versions under the entity the widget is pointed at.
+// Everything is fetched once per scope; switching chart, colours, sorting or searching is
+// done client side (aggregate.ts), so the toolbar never waits on the server.
 
-import type { GroupRef, ProgressData, Scope, StateKey, StatusInfo, WorkItem } from './types';
+import type { ProgressData, Scope, StateKey, StatusInfo, WorkItem } from './types';
 
 /** The part of @ftrack/api's Session we use; mockSession.ts implements the same. */
 export interface QuerySession {
@@ -24,18 +24,12 @@ const UNSUPPORTED_TYPES = ['AssetVersion', 'Component', 'ReviewSession', 'Review
 export class UnsupportedScopeError extends Error {}
 
 const STATUS_FIELDS = ['status.id', 'status.name', 'status.color', 'status.sort', 'status.state.short'];
-const TASK_FIELDS = [
-  'id', 'bid', 'link',
-  'type.id', 'type.name', 'type.color', 'type.sort',
-  'parent.id', 'parent.name',
-  ...STATUS_FIELDS,
-];
 const VERSION_FIELDS = [
   'id', 'asset.id', 'asset.name',
   'asset.type.id', 'asset.type.name',
+  'asset.parent.id', 'asset.parent.name',
   ...STATUS_FIELDS,
 ];
-
 const NO_STATUS: StatusInfo = { id: '__none__', name: 'No status', color: '#8a8f98', sort: -1, state: 'NOT_STARTED' };
 
 function quote(id: string) {
@@ -97,42 +91,37 @@ function toStatus(status: Row | null | undefined): StatusInfo {
   };
 }
 
-function toTask(row: Row): WorkItem {
-  const groups: WorkItem['groups'] = {};
-  groups.taskType = row.type?.id
-    ? { id: row.type.id, name: row.type.name, color: row.type.color || undefined, sort: Number(row.type.sort ?? 0) }
-    : { id: '__none__', name: 'No type' };
-  if (row.parent?.id) {
-    // `link` runs from the project down to the task: [..., sequence, shot, task].
-    const link: Row[] = Array.isArray(row.link) ? row.link : [];
-    const grandparent = link.length >= 3 ? link[link.length - 3] : undefined;
-    const shot: GroupRef = {
-      id: row.parent.id,
-      name: row.parent.name,
-      detail: grandparent?.name,
-      entityType: row.parent.__entity_type__,
-    };
-    groups.shot = shot;
-  }
+function toVersion(row: Row, sequences: Map<string, string>): WorkItem {
+  const type = row.asset?.type;
+  const parent = row.asset?.parent;
   return {
     id: row.id,
     status: toStatus(row.status),
-    // ftrack stores bids in seconds.
-    bidHours: Math.max(0, Number(row.bid) || 0) / 3600,
-    groups,
+    assetType: type?.id ? { id: type.id, name: type.name } : { id: '__none__', name: 'No asset type' },
+    parent: parent?.id
+      ? { id: parent.id, name: parent.name, detail: sequences.get(parent.id), entityType: parent.__entity_type__ }
+      : null,
   };
 }
 
-function toVersion(row: Row): WorkItem {
-  const type = row.asset?.type;
-  return {
-    id: row.id,
-    status: toStatus(row.status),
-    bidHours: 0,
-    groups: {
-      assetType: type?.id ? { id: type.id, name: type.name } : { id: '__none__', name: 'No asset type' },
-    },
-  };
+/**
+ * Name of the entity above each shot (usually its sequence), to tell apart shots that share
+ * a name. Best effort: without it the list just shows bare shot names.
+ */
+async function loadParentNames(session: QuerySession, ids: string[]) {
+  const names = new Map<string, string>();
+  try {
+    const { rows } = await queryAllIn(session, 'TypedContext', ['id', 'link'], ids, (list) => `id in (${list})`);
+    for (const row of rows) {
+      // `link` runs from the project down to the entity itself: [..., sequence, shot].
+      const link: Row[] = Array.isArray(row.link) ? row.link : [];
+      const above = link.length >= 2 ? link[link.length - 2] : undefined;
+      if (above?.name) names.set(row.id, above.name);
+    }
+  } catch (error) {
+    console.warn('Could not load sequence names', error);
+  }
+  return names;
 }
 
 async function loadScope(session: QuerySession, id: string, type: string): Promise<Scope> {
@@ -145,6 +134,7 @@ async function loadScope(session: QuerySession, id: string, type: string): Promi
   }
 }
 
+/** Latest version of every asset under the entity, with the status each one is in. */
 export async function fetchProgress(session: QuerySession, entity: { id: string; type: string }): Promise<ProgressData> {
   if (UNSUPPORTED_TYPES.includes(entity.type)) {
     throw new UnsupportedScopeError(`This widget summarises projects, folders, sequences, shots, tasks and lists. It can't be used on a ${entity.type}.`);
@@ -153,38 +143,31 @@ export async function fetchProgress(session: QuerySession, entity: { id: string;
   const id = quote(entity.id);
   const latest = 'is_latest_version is true';
 
-  let tasks: Promise<{ rows: Row[]; truncated: boolean }>;
   let versions: Promise<{ rows: Row[]; truncated: boolean }>;
-
   if (entity.type === 'Project') {
-    tasks = queryAll(session, 'Task', TASK_FIELDS, `project_id is ${id}`);
-    const versionFilter = hasProperty(session, 'AssetVersion', 'project_id')
+    const filter = hasProperty(session, 'AssetVersion', 'project_id')
       ? `project_id is ${id}`
       : `(asset.context_id is ${id} or asset.parent.project_id is ${id})`;
-    versions = queryAll(session, 'AssetVersion', VERSION_FIELDS, `${versionFilter} and ${latest}`);
+    versions = queryAll(session, 'AssetVersion', VERSION_FIELDS, `${filter} and ${latest}`);
   } else if (LIST_TYPES.includes(entity.type)) {
     // A list holds entities (or versions); count everything under what it holds.
     const { rows: items } = await queryAll(session, 'ListObject', ['entity_id'], `list_id is ${id}`);
     const ids = [...new Set(items.map((r) => String(r.entity_id)))];
-    if (entity.type === 'AssetVersionList') {
-      tasks = Promise.resolve({ rows: [], truncated: false });
-      versions = queryAllIn(session, 'AssetVersion', VERSION_FIELDS, ids, (list) => `id in (${list})`);
-    } else {
-      tasks = queryAllIn(session, 'Task', TASK_FIELDS, ids, (list) => `(id in (${list}) or ancestors.id in (${list}))`);
-      versions = queryAllIn(session, 'AssetVersion', VERSION_FIELDS, ids,
+    versions = entity.type === 'AssetVersionList'
+      ? queryAllIn(session, 'AssetVersion', VERSION_FIELDS, ids, (list) => `id in (${list})`)
+      : queryAllIn(session, 'AssetVersion', VERSION_FIELDS, ids,
         (list) => `(asset.context_id in (${list}) or asset.parent.ancestors.id in (${list})) and ${latest}`);
-    }
   } else {
-    tasks = queryAll(session, 'Task', TASK_FIELDS, `(id is ${id} or ancestors.id is ${id})`);
     versions = queryAll(session, 'AssetVersion', VERSION_FIELDS,
       `(task_id is ${id} or asset.context_id is ${id} or asset.parent.ancestors.id is ${id}) and ${latest}`);
   }
 
-  const [scope, t, v] = await Promise.all([scopePromise, tasks, versions]);
+  const [scope, v] = await Promise.all([scopePromise, versions]);
+  const parentIds = [...new Set(v.rows.map((r) => r.asset?.parent?.id).filter(Boolean) as string[])];
+  const sequences = await loadParentNames(session, parentIds);
   return {
     scope,
-    tasks: t.rows.map(toTask),
-    versions: v.rows.map(toVersion),
-    truncated: t.truncated || v.truncated,
+    versions: v.rows.map((row) => toVersion(row, sequences)),
+    truncated: v.truncated,
   };
 }
