@@ -11,7 +11,9 @@ const STATUSES = [
   { id: 's-fix', name: 'Needs fixes', color: '#e0605e', sort: 3, state: { short: 'BLOCKED' } },
   { id: 's-app', name: 'Approved', color: '#56b98e', sort: 4, state: { short: 'DONE' } },
 ];
-const ASSET_TYPES = ['Plate', 'Camera', 'Geometry', 'Rig', 'Animation cache', 'FX cache', 'Render', 'Comp'];
+// In workflow order, the way ftrack's task type `sort` puts them.
+const TASK_TYPES = ['Tracking', 'Modeling', 'Rigging', 'Animation', 'FX', 'Lighting', 'Compositing']
+  .map((name, sort) => ({ id: `tt-${sort}`, name, sort }));
 
 /** Deterministic pseudo-random numbers, so reloads show the same project. */
 function rng(seed: number) {
@@ -24,36 +26,25 @@ function rng(seed: number) {
 function build(shotCount: number) {
   const rand = rng(42);
   const project = { id: 'mock-project', name: 'Demo project', __entity_type__: 'Project' };
-  const versions: Record<string, unknown>[] = [];
+  const tasks: Record<string, unknown>[] = [];
   const contexts: Record<string, unknown>[] = [];
   for (let i = 0; i < shotCount; i++) {
     const seq = { id: `seq-${Math.floor(i / 8)}`, name: `sq${String(Math.floor(i / 8) + 1).padStart(3, '0')}` };
     // Shot names repeat across sequences, as happens in real projects.
     const shot = { id: `shot-${i}`, name: `sh${String(((i % 8) + 1) * 10).padStart(4, '0')}`, __entity_type__: 'Shot' };
     contexts.push({ id: shot.id, link: [project, seq, shot] });
-    // Earlier shots are further along.
+    // Earlier shots are further along, and tasks run down the pipeline: early departments
+    // finish first.
     const maturity = 1 - i / Math.max(shotCount, 1);
-    ASSET_TYPES.forEach((typeName, t) => {
-      if (rand() < 0.3) return;
-      const copies = typeName === 'Render' || typeName === 'Geometry' ? 1 + Math.floor(rand() * 3) : 1;
-      for (let c = 0; c < copies; c++) {
-        const roll = rand() * 0.7 + maturity * 0.45;
-        const status = roll > 0.85 ? STATUSES[4] : roll > 0.7 ? STATUSES[2] : roll > 0.5 ? STATUSES[1]
-          : roll > 0.44 ? STATUSES[3] : STATUSES[0];
-        versions.push({
-          id: `ver-${i}-${t}-${c}`,
-          asset: {
-            id: `asset-${i}-${t}-${c}`,
-            name: `${shot.name}_${typeName.toLowerCase().replace(' ', '_')}${c ? `_${c + 1}` : ''}`,
-            type: { id: `at-${t}`, name: typeName },
-            parent: shot,
-          },
-          status,
-        });
-      }
+    TASK_TYPES.forEach((type) => {
+      if (rand() < 0.2) return;
+      const roll = rand() * 0.6 + maturity * 0.5 - type.sort * 0.05;
+      const status = roll > 0.75 ? STATUSES[4] : roll > 0.6 ? STATUSES[2] : roll > 0.4 ? STATUSES[1]
+        : roll > 0.35 ? STATUSES[3] : STATUSES[0];
+      tasks.push({ id: `task-${i}-${type.id}`, type, parent: shot, status });
     });
   }
-  return { project, versions, contexts };
+  return { project, tasks, contexts };
 }
 
 export function createMockSession(): QuerySession {
@@ -75,10 +66,10 @@ export function createMockSession(): QuerySession {
         return { data: [shot ? { name: shot.link[shot.link.length - 1].name } : db.project] };
       }
       if (/from TypedContext /.test(expression)) return page(db.contexts);
-      if (/from AssetVersion /.test(expression)) {
+      if (/from Task /.test(expression)) {
         const rows = shotId && !/ in \(/.test(expression)
-          ? db.versions.filter((v) => (v.asset as { parent: { id: string } }).parent.id === shotId)
-          : db.versions;
+          ? db.tasks.filter((t) => (t.parent as { id: string }).id === shotId)
+          : db.tasks;
         return page(rows);
       }
       return { data: [] };

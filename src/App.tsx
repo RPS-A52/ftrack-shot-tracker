@@ -36,10 +36,10 @@ interface Props {
 
 export default function App({ session, entity: fixedEntity }: Props) {
   const entity = useFtrackEntity(fixedEntity);
-  const { state, reload } = useProgressData(session, entity);
   const [stored, setSettings] = usePersistentState('settings', DEFAULTS, isSettings);
   // Older saved settings may carry fields this version no longer has.
   const settings: ViewSettings = { chart: stored.chart, breakdown: stored.breakdown, sortBy: stored.sortBy, normalize: stored.normalize };
+  const { state, reload } = useProgressData(session, entity);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -47,10 +47,10 @@ export default function App({ session, entity: fixedEntity }: Props) {
   const { breakdown, sortBy } = settings;
   const view = useMemo(() => {
     if (!data) return undefined;
-    const series = buildSeries(data.versions, breakdown);
+    const series = buildSeries(data.tasks, breakdown);
     return {
-      overall: aggregate(data.versions, series, breakdown),
-      shots: summariseShots(data.versions, series, breakdown, sortBy),
+      overall: aggregate(data.tasks, series, breakdown),
+      shots: summariseShots(data.tasks, series, breakdown, sortBy),
     };
   }, [data, breakdown, sortBy]);
   // A folder, sequence or project with several shots gets the per-shot list.
@@ -120,11 +120,11 @@ function Header({ data, agg, shotCount }: { data?: ProgressData; agg?: Aggregate
         <Typography variant="body2" noWrap sx={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
           <b>{formatPercent(agg.progress)}</b>
           <Box component="span" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
-            {' '}done · {formatCount(agg.done)} of {formatCount(agg.total)} assets
+            {' '}done · {formatCount(agg.done)} of {formatCount(agg.total)} tasks
           </Box>
         </Typography>
       </Stack>
-      <Tooltip title={`${formatPercent(agg.progress)} of assets have their latest version in a done status`}>
+      <Tooltip title={`${formatPercent(agg.progress)} of tasks are in a done status`}>
         <LinearProgress
           variant="determinate"
           value={agg.progress * 100}
@@ -133,7 +133,7 @@ function Header({ data, agg, shotCount }: { data?: ProgressData; agg?: Aggregate
         />
       </Tooltip>
       {data.truncated && (
-        <Typography variant="caption" color="warning.main">Very large scope: only the first 50,000 versions are counted.</Typography>
+        <Typography variant="caption" color="warning.main">Very large scope: only the first 50,000 tasks are counted.</Typography>
       )}
     </Stack>
   );
@@ -210,12 +210,11 @@ function Body(props: {
   );
 
   if (view.overall.total === 0) {
+    const where = state.status === 'ready' ? state.data.scope.type.toLowerCase() : 'entity';
     return (
       <>
         {staleError}
-        <EmptyState title="No published versions here">
-          Nothing has been published under this {state.status === 'ready' ? state.data.scope.type.toLowerCase() : 'entity'} yet.
-        </EmptyState>
+        <EmptyState title="No tasks here">There are no tasks under this {where}.</EmptyState>
       </>
     );
   }

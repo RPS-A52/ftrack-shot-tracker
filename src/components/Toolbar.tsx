@@ -29,7 +29,7 @@ const SORT_LABELS: Record<SortBy, string> = {
   default: 'Sequence order',
   name: 'Shot name',
   progress: 'Most complete first',
-  total: 'Most assets first',
+  total: 'Largest first',
 };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -65,7 +65,7 @@ export default function Toolbar({ settings, onChange, hasShotList, loading, onRe
           </ToggleButton>
         </Tooltip>
       </ToggleButtonGroup>
-      <Typography variant="body2" color="text.secondary" noWrap>by asset type</Typography>
+      <Typography variant="body2" color="text.secondary" noWrap>Tasks by task type</Typography>
 
       <Box sx={{ flex: 1 }} />
 

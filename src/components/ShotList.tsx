@@ -1,4 +1,4 @@
-// One card per shot under the selected folder/sequence/project, each with that shot's asset
+// One card per shot under the selected folder/sequence/project, each with that shot's task
 // types as bars or donuts. Virtualised with react-virtuoso: only the cards on screen exist,
 // so projects with hundreds of shots scroll smoothly.
 
@@ -17,7 +17,8 @@ import type { ChartKind, GroupRef } from '../data/types';
 import StackedBars from './StackedBars';
 import { labelWidthFor } from './chartUtils';
 import Donut from './Donut';
-import AssetSunburst from './AssetSunburst';
+import TaskSunburst from './TaskSunburst';
+
 import { slices } from './chartUtils';
 import { useElementSize } from './useElementSize';
 
@@ -154,6 +155,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
   onOpen?: () => void;
 }) {
   const theme = useTheme();
+
   const bodyRef = useRef<HTMLDivElement>(null);
   const { width } = useElementSize(bodyRef);
   const series = agg.series.filter((s) => !hidden.has(s.key));
@@ -175,7 +177,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
           {kind && <Chip label={kind} size="small" variant="outlined" sx={{ height: 18, fontSize: 10, alignSelf: 'center' }} />}
         </Box>
         {/* Pie mode shows the shot's total as a large donut in the body instead. */}
-        {chart === 'bar' && <Tooltip title={`${formatCount(agg.done)} of ${formatCount(agg.total)} assets done`}>
+        {chart === 'bar' && <Tooltip title={`${formatCount(agg.done)} of ${formatCount(agg.total)} tasks done`}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
             <LinearProgress
               variant="determinate"
@@ -213,7 +215,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
             )}
           </Box>
         ) : (
-          // Narrow cards put the shot total above the asset types instead of beside them.
+          // Narrow cards put the shot total above the task types instead of beside them.
           <Box sx={{ display: 'flex', flexDirection: stacked ? 'column' : 'row', gap: 1.5, alignItems: stacked ? 'stretch' : 'center' }}>
           <Box sx={{ flex: 1, minWidth: 0, order: stacked ? 1 : 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 1, pt: 0.5, alignContent: 'center' }}>
             {agg.rows.map((row) => (
@@ -243,7 +245,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
                 : { borderLeft: 1, borderColor: 'divider', alignSelf: 'stretch', justifyContent: 'center' }),
             }}
           >
-            <AssetSunburst agg={agg} hidden={hidden} size={BIG_DONUT} />
+            <TaskSunburst agg={agg} hidden={hidden} size={BIG_DONUT} />
             <Typography sx={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
               {formatPercent(agg.progress)}
             </Typography>

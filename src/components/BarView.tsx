@@ -1,5 +1,5 @@
 // Full-size bars for one shot (or any scope without several shots). Rows keep a readable
-// height, so a long list of asset types scrolls instead of squashing the bars.
+// height, so a long list of task types scrolls instead of squashing the bars.
 
 import { useRef } from 'react';
 import { Box } from '@mui/material';

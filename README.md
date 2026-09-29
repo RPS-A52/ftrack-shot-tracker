@@ -1,18 +1,19 @@
 # ftrack-shot-tracker
 
-An ftrack dashboard widget that charts progress of the latest version of every asset under the
-selected project, folder, sequence, shot or list, by asset type and status, as stacked bars or
-donuts.
+An ftrack dashboard widget that charts progress of the tasks under the selected project, folder,
+sequence, shot or list, by task type and status, as stacked bars or donuts.
 
 - **Several shots** under the selection (a folder, sequence or project): a scrolling list with one
-  card per shot, each showing that shot's asset types, its sequence and its % done, under an
-  **All shots** summary. The search box filters by shot or sequence name (every word must match;
-  Esc clears). The list is virtualised with [react-virtuoso](https://virtuoso.dev/), so only the
-  cards on screen are rendered.
-- **One shot**: its asset types full size. In bar mode, click a row to open its donut.
+  card per shot, each showing that shot's task types, its sequence and its % done, under an
+  **All shots** summary. In pie mode each card also has a two-ring donut: task types inside
+  (labelled), their statuses around them. The search box filters by shot or sequence name (every
+  word must match; Esc clears). The list is virtualised with
+  [react-virtuoso](https://virtuoso.dev/), so only the cards on screen are rendered.
+- **One shot**: its task types full size. In bar mode, click a row to open its donut.
+- **Task types** are in workflow order (their ftrack sort), not alphabetical.
 - **Colour by**: each workflow status in its ftrack colour, or the four states (not started,
   in progress, blocked, done).
-- **Progress** is the share of assets whose latest version is in a *Done*-state status.
+- **Progress** is the share of tasks whose status is in the *Done* state.
 
 Click a legend entry to hide that status. **Open in ftrack** on a shot card opens its sidebar.
 Display options (the sliders icon: colours, shot sort order, 100% bars) are remembered per browser
@@ -84,17 +85,19 @@ the browser supports it. Queries that later fail with 401/403 show the same advi
 
 ## Data
 
-`src/data/fetchProgress.ts` loads the latest version of every asset under the selection once
-(paged, 1000 rows per query, capped at 50 000 with a warning), plus each shot's parent name (its
-sequence, from `link`) to tell apart shots with the same name. `src/data/aggregate.ts` builds the
-chart rows client side, so the toolbar and search never wait on the server. Answers for a previous
-selection are discarded when the selection changes quickly.
+`src/data/fetchProgress.ts` loads every task under the selection once (paged, 1000 rows per
+query, capped at 50 000 with a warning), plus each shot's parent name (its sequence, from `link`)
+to tell apart shots with the same name. `src/data/aggregate.ts` builds the chart rows client side,
+so the toolbar and search never wait on the server. Answers for a previous selection are
+discarded when the selection changes quickly.
 
-A "shot" is whatever entity the asset is published on: usually a shot, but an asset build or a
-sequence shows up the same way, labelled with its type.
+A "shot" is whatever entity the task is on: usually a shot, but an asset build or a sequence
+shows up the same way, labelled with its type.
 
-| Selected entity | Versions counted |
+| Selected entity | Tasks counted |
 |---|---|
-| Project | `project_id` (or `asset.parent` when the schema lacks it) |
-| Folder, sequence, shot, task… | assets on it or under it, or published from the task |
-| List | assets on or under the listed entities; an AssetVersionList counts its versions |
+| Project | `project_id` |
+| Folder, sequence, shot, task… | the entity itself (if a task) and every task under it |
+| List | tasks on or under the listed entities |
+
+Version lists, versions and review sessions hold no tasks; the widget says so instead of charting.

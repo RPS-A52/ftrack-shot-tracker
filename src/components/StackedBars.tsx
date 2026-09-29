@@ -1,12 +1,14 @@
-// Horizontal stacked bars, one row per asset type, one segment per status. Used full size
+// Horizontal stacked bars, one row per task type, one segment per status. Used full size
 // (BarView) and small inside each shot card (ShotList).
 
 import { BarChart, barLabelClasses } from '@mui/x-charts/BarChart';
 import { axisClasses } from '@mui/x-charts/ChartsAxis';
 import { useTheme } from '@mui/material/styles';
 import type { GroupRow, Series } from '../data/aggregate';
-import { formatCount, formatPercent } from '../data/aggregate';
+import { formatCount, formatPercent, formatTasks } from '../data/aggregate';
 import { AXIS_SPACE, textWidth, truncate } from './chartUtils';
+
+
 
 interface Props {
   rows: GroupRow[];
@@ -25,6 +27,7 @@ interface Props {
 
 export default function StackedBars({ rows, series, normalize, width, height, labelWidth, axis, xMax, onRowClick }: Props) {
   const theme = useTheme();
+
   const labels = rows.map((r) => r.label);
   const value = (row: GroupRow, key: string) => {
     const v = row.values[key] ?? 0;
@@ -50,7 +53,7 @@ export default function StackedBars({ rows, series, normalize, width, height, la
         valueFormatter: (v: string, ctx) => {
           if (ctx.location !== 'tooltip') return truncate(v, labelWidth - 12);
           const row = rows[labels.indexOf(v)];
-          return row ? `${v} — ${formatPercent(row.progress)} done · ${formatCount(row.total)} asset${row.total === 1 ? '' : 's'}` : v;
+          return row ? `${v} — ${formatPercent(row.progress)} done · ${formatTasks(row.total)}` : v;
         },
         tickLabelStyle: { fontSize: 12 },
       }]}
@@ -60,7 +63,7 @@ export default function StackedBars({ rows, series, normalize, width, height, la
         valueFormatter: (v: number) => (normalize ? `${v}%` : String(v)),
         tickLabelStyle: { fontSize: 11 },
         tickNumber: Math.max(2, Math.floor(width / 110)),
-        // Counts are whole numbers; no 0.5-version ticks.
+        // Counts are whole numbers; no 0.5-task ticks.
         tickMinStep: normalize ? undefined : 1,
       }]}
       topAxis={axis === 'top' ? scale : null}

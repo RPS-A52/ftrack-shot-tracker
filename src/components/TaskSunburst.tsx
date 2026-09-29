@@ -1,4 +1,4 @@
-// Two-ring donut for a shot: the inner ring is one slice per asset type, labelled with its
+// Two-ring donut for a shot: the inner ring is one slice per task type, labelled with its
 // name; the outer ring splits each of those slices into its statuses, in status colours.
 // Both rings are built from the same numbers in the same order, so their angles line up.
 
@@ -6,8 +6,10 @@ import { Box } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import { PieChart, pieArcLabelClasses } from '@mui/x-charts/PieChart';
 import type { Aggregate } from '../data/aggregate';
-import { formatCount, formatPercent } from '../data/aggregate';
+import { formatCount, formatPercent, formatTasks } from '../data/aggregate';
 import { textWidth } from './chartUtils';
+
+
 
 interface Props {
   agg: Aggregate;
@@ -39,15 +41,16 @@ function fitLabel(text: string, startAngle: number, endAngle: number, midRadius:
   return '';
 }
 
-export default function AssetSunburst({ agg, hidden, size }: Props) {
+export default function TaskSunburst({ agg, hidden, size }: Props) {
   const theme = useTheme();
+
   const radius = size / 2;
   // The named ring gets most of the room; statuses are a band around it.
   const inner = { innerRadius: radius * 0.2, outerRadius: radius * 0.76 };
   const outer = { innerRadius: radius * 0.79, outerRadius: radius };
   const series = agg.series.filter((s) => !hidden.has(s.key));
 
-  // Only asset types with something visible, so the two rings add up to the same total.
+  // Only task types with something visible, so the two rings add up to the same total.
   const rows = agg.rows
     .map((row) => ({ row, parts: series.filter((s) => (row.values[s.key] ?? 0) > 0) }))
     .filter(({ parts }) => parts.length > 0);
@@ -57,7 +60,7 @@ export default function AssetSunburst({ agg, hidden, size }: Props) {
     id: row.ref.id,
     label: row.label,
     value: parts.reduce((n, s) => n + row.values[s.key], 0),
-    // Alternating neutral tints keep neighbouring asset types apart without competing with
+    // Alternating neutral tints keep neighbouring task types apart without competing with
     // the status colours around them.
     color: alpha(theme.palette.text.primary, i % 2 ? 0.16 : 0.26),
     progress: row.progress,
@@ -89,7 +92,7 @@ export default function AssetSunburst({ agg, hidden, size }: Props) {
           highlightScope: { fade: 'global', highlight: 'item' },
           valueFormatter: (item) => {
             const slice = typeSlices.find((s) => s.id === item.id);
-            return `${formatCount(item.value)} asset${item.value === 1 ? '' : 's'} · ${formatPercent(slice?.progress ?? 0)} done`;
+            return `${formatTasks(item.value)} · ${formatPercent(slice?.progress ?? 0)} done`;
           },
           arcLabel: (item) => fitLabel(item.label ?? '', item.startAngle, item.endAngle,
             (inner.innerRadius + inner.outerRadius) / 2, inner.outerRadius - inner.innerRadius),
