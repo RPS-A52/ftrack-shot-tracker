@@ -1,13 +1,15 @@
-// Full-size donuts for one shot: a large one for all its assets (or the focused asset type)
-// next to a small one per asset type. Narrow widgets stack them and scroll as one page.
+// Full-size donuts for one shot: a large one for all its tasks (or the focused task type)
+// next to a small one per task type. Narrow widgets stack them and scroll as one page.
 
 import { useEffect, useRef } from 'react';
 import { Box, Button, ButtonBase, Paper, Stack, Tooltip, Typography, useMediaQuery } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import type { Aggregate } from '../data/aggregate';
-import { formatCount, formatPercent } from '../data/aggregate';
+import { formatCount, formatPercent, formatTasks } from '../data/aggregate';
 import Donut from './Donut';
+
+
 import { slices } from './chartUtils';
 
 interface Props {
@@ -19,11 +21,12 @@ interface Props {
 
 export default function PieView({ agg, hidden, focusId, onFocus }: Props) {
   const theme = useTheme();
+
   const narrow = useMediaQuery('(max-width: 620px)');
   const short = useMediaQuery('(max-height: 360px)');
   const focused = focusId ? agg.rows.find((r) => r.ref.id === focusId) ?? null : null;
 
-  // The focused asset type can disappear after a refresh or a new selection.
+  // The focused task type can disappear after a refresh or a new selection.
   useEffect(() => {
     if (focusId && !focused) onFocus(null);
   }, [focusId, focused, onFocus]);
@@ -43,10 +46,10 @@ export default function PieView({ agg, hidden, focusId, onFocus }: Props) {
     <Stack spacing={1.5} alignItems="center" sx={{ p: 2, minWidth: 0 }}>
       <Box sx={{ textAlign: 'center', minWidth: 0, maxWidth: '100%' }}>
         <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1.5 }}>
-          {focused ? 'Asset type' : 'All'}
+          {focused ? 'Task type' : 'All'}
         </Typography>
         <Typography variant="subtitle1" noWrap title={focused?.label} sx={{ fontWeight: 600 }}>
-          {focused ? focused.label : 'All asset types'}
+          {focused ? focused.label : 'All task types'}
         </Typography>
       </Box>
       <Donut data={slices(main.values, agg.series, hidden)} size={mainSize} total={main.total} interactive>
@@ -55,7 +58,7 @@ export default function PieView({ agg, hidden, focusId, onFocus }: Props) {
         {mainSize >= 180 && <Typography variant="caption" color="text.secondary">{formatCount(main.done)} of {formatCount(main.total)}</Typography>}
       </Donut>
       {mainSize < 180 && <Typography variant="caption" color="text.secondary" sx={{ mt: -0.5 }}>{doneText}</Typography>}
-      {focused && <Button size="small" startIcon={<ArrowBackIcon />} onClick={() => onFocus(null)}>All asset types</Button>}
+      {focused && <Button size="small" startIcon={<ArrowBackIcon />} onClick={() => onFocus(null)}>All task types</Button>}
     </Stack>
   );
 
@@ -91,7 +94,7 @@ export default function PieView({ agg, hidden, focusId, onFocus }: Props) {
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{row.label}</Typography>
                 <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatCount(row.total)} asset{row.total === 1 ? '' : 's'}
+                  {formatTasks(row.total)}
                 </Typography>
               </Box>
             </Paper>

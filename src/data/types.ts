@@ -9,12 +9,13 @@ export interface StatusInfo {
   state: StateKey;
 }
 
-/** The latest version of one asset: what the widget counts. */
+/** One task: what the widget counts. */
 export interface WorkItem {
   id: string;
   status: StatusInfo;
-  assetType: GroupRef;
-  /** The entity the asset is published on, normally a shot. */
+  /** Its task type: the chart rows. */
+  taskType: GroupRef;
+  /** The entity the task is on, normally a shot. */
   parent: GroupRef | null;
 }
 
@@ -25,6 +26,8 @@ export interface GroupRef {
   detail?: string;
   /** ftrack entity type, for opening the sidebar and labelling non-shot parents. */
   entityType?: string;
+  /** Workflow order (task types have one); rows sort by it, then by name. */
+  sort?: number;
 }
 
 export type Breakdown = 'status' | 'state';
@@ -40,7 +43,7 @@ export interface Scope {
 
 export interface ProgressData {
   scope: Scope;
-  versions: WorkItem[];
+  tasks: WorkItem[];
   /** True if the query was cut short by the safety limit (see fetchProgress.ts). */
   truncated: boolean;
 }

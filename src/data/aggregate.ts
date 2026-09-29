@@ -1,4 +1,4 @@
-// Turns versions into chart rows: one row per asset type, one series per status (or state),
+// Turns tasks into chart rows: one row per task type, one series per status (or state),
 // for the whole scope and for each shot in it.
 
 import type { Breakdown, GroupRef, SortBy, StateKey, WorkItem } from './types';
@@ -24,7 +24,7 @@ export interface GroupRow {
 
 export interface Aggregate {
   series: Series[];
-  /** One per asset type, by name. */
+  /** One per task type, in workflow order. */
   rows: GroupRow[];
   totals: Record<string, number>;
   total: number;
@@ -62,13 +62,13 @@ export function buildSeries(items: WorkItem[], breakdown: Breakdown): Series[] {
     .map(({ key, label, color, done }) => ({ key, label, color, done }));
 }
 
-/** Counts `items` per asset type and status. */
+/** Counts `items` per task type and status. */
 export function aggregate(items: WorkItem[], series: Series[], breakdown: Breakdown): Aggregate {
   const seriesKey = (item: WorkItem) => (breakdown === 'state' ? item.status.state : item.status.id);
   const rowMap = new Map<string, GroupRow>();
   const totals: Record<string, number> = {};
   for (const item of items) {
-    const ref = item.assetType;
+    const ref = item.taskType;
     let row = rowMap.get(ref.id);
     if (!row) {
       row = { ref, label: ref.name, values: {}, total: 0, done: 0, progress: 0 };
@@ -81,14 +81,15 @@ export function aggregate(items: WorkItem[], series: Series[], breakdown: Breakd
     totals[key] = (totals[key] ?? 0) + 1;
   }
 
-  const rows = [...rowMap.values()].sort((a, b) => compareNames(a.label, b.label));
+  // Task types in workflow order (their ftrack sort), then by name.
+  const rows = [...rowMap.values()].sort((a, b) => (a.ref.sort ?? 0) - (b.ref.sort ?? 0) || compareNames(a.label, b.label));
   for (const row of rows) row.progress = row.total > 0 ? row.done / row.total : 0;
   const total = items.length;
   const done = rows.reduce((sum, r) => sum + r.done, 0);
   return { series, rows, totals, total, done, progress: total > 0 ? done / total : 0 };
 }
 
-/** One summary per shot (the entity each asset is published on). */
+/** One summary per shot (the entity each task is on). */
 export function summariseShots(items: WorkItem[], series: Series[], breakdown: Breakdown, sortBy: SortBy): ShotSummary[] {
   const byShot = new Map<string, { ref: GroupRef; items: WorkItem[] }>();
   for (const item of items) {
@@ -123,6 +124,11 @@ export function summariseShots(items: WorkItem[], series: Series[], breakdown: B
 
 export function formatCount(value: number) {
   return Math.round(value).toLocaleString();
+}
+
+/** "1 task", "12 tasks" */
+export function formatTasks(value: number) {
+  return `${formatCount(value)} task${Math.round(value) === 1 ? '' : 's'}`;
 }
 
 export function formatPercent(fraction: number) {
