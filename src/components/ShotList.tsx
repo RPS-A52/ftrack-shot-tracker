@@ -17,6 +17,7 @@ import type { ChartKind, GroupRef } from '../data/types';
 import StackedBars from './StackedBars';
 import { labelWidthFor } from './chartUtils';
 import Donut from './Donut';
+import AssetSunburst from './AssetSunburst';
 import { slices } from './chartUtils';
 import { useElementSize } from './useElementSize';
 
@@ -30,6 +31,7 @@ interface Props {
 }
 
 const ROW_H = 26;
+const BIG_DONUT = 200;
 
 type Item = { kind: 'all'; agg: Aggregate } | { kind: 'shot'; shot: ShotSummary };
 
@@ -156,6 +158,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
   const { width } = useElementSize(bodyRef);
   const series = agg.series.filter((s) => !hidden.has(s.key));
   const barsHeight = agg.rows.length * ROW_H + 8;
+  const stacked = width > 0 && width < 380;
 
   return (
     <Paper
@@ -171,7 +174,8 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
           {subtitle && <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 1, minWidth: 0 }}>{subtitle}</Typography>}
           {kind && <Chip label={kind} size="small" variant="outlined" sx={{ height: 18, fontSize: 10, alignSelf: 'center' }} />}
         </Box>
-        <Tooltip title={`${formatCount(agg.done)} of ${formatCount(agg.total)} assets done`}>
+        {/* Pie mode shows the shot's total as a large donut in the body instead. */}
+        {chart === 'bar' && <Tooltip title={`${formatCount(agg.done)} of ${formatCount(agg.total)} assets done`}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
             <LinearProgress
               variant="determinate"
@@ -182,7 +186,7 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
               {formatPercent(agg.progress)}
             </Typography>
           </Stack>
-        </Tooltip>
+        </Tooltip>}
         {onOpen && (
           <Tooltip title="Open in ftrack">
             <IconButton size="small" onClick={onOpen} aria-label={`Open ${title} in ftrack`} sx={{ mr: -0.5 }}>
@@ -209,7 +213,9 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
             )}
           </Box>
         ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 1, pt: 0.5 }}>
+          // Narrow cards put the shot total above the asset types instead of beside them.
+          <Box sx={{ display: 'flex', flexDirection: stacked ? 'column' : 'row', gap: 1.5, alignItems: stacked ? 'stretch' : 'center' }}>
+          <Box sx={{ flex: 1, minWidth: 0, order: stacked ? 1 : 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 1, pt: 0.5, alignContent: 'center' }}>
             {agg.rows.map((row) => (
               <Tooltip key={row.ref.id} title={`${row.label}: ${formatCount(row.done)} of ${formatCount(row.total)} done`}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
@@ -225,6 +231,26 @@ function ShotCard({ title, subtitle, kind, agg, chart, normalize, hidden, typeNa
                 </Stack>
               </Tooltip>
             ))}
+          </Box>
+          <Stack
+            alignItems="center"
+            spacing={0.5}
+            sx={{
+              flexShrink: 0,
+              px: 1.5,
+              ...(stacked
+                ? { pb: 1, borderBottom: 1, borderColor: 'divider' }
+                : { borderLeft: 1, borderColor: 'divider', alignSelf: 'stretch', justifyContent: 'center' }),
+            }}
+          >
+            <AssetSunburst agg={agg} hidden={hidden} size={BIG_DONUT} />
+            <Typography sx={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+              {formatPercent(agg.progress)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+              {formatCount(agg.done)} of {formatCount(agg.total)} done
+            </Typography>
+          </Stack>
           </Box>
         )}
       </Box>
