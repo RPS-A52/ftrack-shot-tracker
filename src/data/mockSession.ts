@@ -11,6 +11,8 @@ const STATUSES = [
   { id: 's-fix', name: 'Needs fixes', color: '#e0605e', sort: 3, state: { short: 'BLOCKED' } },
   { id: 's-app', name: 'Approved', color: '#56b98e', sort: 4, state: { short: 'DONE' } },
 ];
+// Work that will not be done, which studios often want left out of the counts.
+const OMITTED = { id: 's-omit', name: 'Omitted', color: '#5c6370', sort: 5, state: { short: 'BLOCKED' } };
 // In workflow order, the way ftrack's task type `sort` puts them.
 const TASK_TYPES = ['Tracking', 'Modeling', 'Rigging', 'Animation', 'FX', 'Lighting', 'Compositing']
   .map((name, sort) => ({ id: `tt-${sort}`, name, sort }));
@@ -39,8 +41,9 @@ function build(shotCount: number) {
     TASK_TYPES.forEach((type) => {
       if (rand() < 0.2) return;
       const roll = rand() * 0.6 + maturity * 0.5 - type.sort * 0.05;
-      const status = roll > 0.75 ? STATUSES[4] : roll > 0.6 ? STATUSES[2] : roll > 0.4 ? STATUSES[1]
-        : roll > 0.35 ? STATUSES[3] : STATUSES[0];
+      const status = rand() < 0.08 ? OMITTED
+        : roll > 0.75 ? STATUSES[4] : roll > 0.6 ? STATUSES[2] : roll > 0.4 ? STATUSES[1]
+          : roll > 0.35 ? STATUSES[3] : STATUSES[0];
       tasks.push({ id: `task-${i}-${type.id}`, type, parent: shot, status });
     });
   }
