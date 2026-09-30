@@ -7,7 +7,7 @@ import { alpha, useTheme } from '@mui/material/styles';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import type { QuerySession } from './data/fetchProgress';
 import { UnsupportedScopeError } from './data/fetchProgress';
-import { aggregate, buildSeries, formatCount, formatPercent, summariseShots, type Aggregate } from './data/aggregate';
+import { aggregate, buildSeries, compareNames, formatCount, formatPercent, formatTasks, summariseShots, type Aggregate } from './data/aggregate';
 import type { GroupRef, ProgressData } from './data/types';
 import { isBool, oneOf, useFtrackEntity, useProgressData, usePersistentState, type EntityRef, type LoadState } from './hooks';
 import Toolbar, { type ViewSettings } from './components/Toolbar';
@@ -15,6 +15,9 @@ import Legend from './components/Legend';
 import BarView from './components/BarView';
 import PieView from './components/PieView';
 import ShotList from './components/ShotList';
+import StatusFilter, { type StatusOption } from './components/StatusFilter';
+
+const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
 const DEFAULTS: ViewSettings = {
   chart: 'bar',
@@ -43,16 +46,33 @@ export default function App({ session, entity: fixedEntity }: Props) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusId, setFocusId] = useState<string | null>(null);
 
+  const [excluded, setExcluded] = usePersistentState('excludedStatuses', [] as string[], isStringArray);
+
   const data = 'data' in state ? state.data : undefined;
   const { breakdown, sortBy } = settings;
+
+  // Every status in the scope, in workflow order, with how many tasks are in it.
+  const statusOptions = useMemo<StatusOption[]>(() => {
+    const byName = new Map<string, StatusOption & { sort: number }>();
+    for (const { status } of data?.tasks ?? []) {
+      const entry = byName.get(status.name) ?? { name: status.name, color: status.color, count: 0, sort: status.sort };
+      entry.count += 1;
+      byName.set(status.name, entry);
+    }
+    return [...byName.values()].sort((a, b) => a.sort - b.sort || compareNames(a.name, b.name));
+  }, [data]);
+
   const view = useMemo(() => {
     if (!data) return undefined;
-    const series = buildSeries(data.tasks, breakdown);
+    // Excluded statuses leave the counts entirely, unlike a status hidden from the legend.
+    const counted = excluded.length ? data.tasks.filter((t) => !excluded.includes(t.status.name)) : data.tasks;
+    const series = buildSeries(counted, breakdown);
     return {
-      overall: aggregate(data.tasks, series, breakdown),
-      shots: summariseShots(data.tasks, series, breakdown, sortBy),
+      overall: aggregate(counted, series, breakdown),
+      shots: summariseShots(counted, series, breakdown, sortBy),
+      excludedCount: data.tasks.length - counted.length,
     };
-  }, [data, breakdown, sortBy]);
+  }, [data, excluded, breakdown, sortBy]);
   // A folder, sequence or project with several shots gets the per-shot list.
   const showShotList = Boolean(view && view.shots.length > 1);
 
@@ -75,8 +95,17 @@ export default function App({ session, entity: fixedEntity }: Props) {
   return (
     <Box component="main" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary', overflow: 'hidden' }}>
       <Box sx={{ position: 'relative', px: 1.5, pt: 1.25, pb: 1, display: 'flex', flexDirection: 'column', gap: 1, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
-        {(data || state.status === 'loading') && <Header data={data} agg={view?.overall} shotCount={view?.shots.length ?? 0} />}
-        <Toolbar settings={settings} onChange={change} hasShotList={showShotList} loading={state.status === 'loading'} onRefresh={reload} />
+        {(data || state.status === 'loading') && (
+          <Header data={data} agg={view?.overall} shotCount={view?.shots.length ?? 0} excluded={excluded} excludedCount={view?.excludedCount ?? 0} />
+        )}
+        <Toolbar
+          settings={settings}
+          onChange={change}
+          hasShotList={showShotList}
+          loading={state.status === 'loading'}
+          onRefresh={reload}
+          filter={data && <StatusFilter options={statusOptions} excluded={excluded} onChange={setExcluded} />}
+        />
         {view && <Legend agg={view.overall} hidden={hidden} onToggle={toggleSeries} />}
         {state.status === 'loading' && data && (
           <LinearProgress sx={{ position: 'absolute', left: 0, right: 0, bottom: -1, height: 2 }} />
@@ -96,13 +125,21 @@ export default function App({ session, entity: fixedEntity }: Props) {
           onOpen={openInFtrack}
           onReload={reload}
           onChange={change}
+          excludedCount={view?.excludedCount ?? 0}
+          onClearExcluded={() => setExcluded([])}
         />
       </Box>
     </Box>
   );
 }
 
-function Header({ data, agg, shotCount }: { data?: ProgressData; agg?: Aggregate; shotCount: number }) {
+function Header({ data, agg, shotCount, excluded, excludedCount }: {
+  data?: ProgressData;
+  agg?: Aggregate;
+  shotCount: number;
+  excluded: string[];
+  excludedCount: number;
+}) {
   const theme = useTheme();
   if (!data || !agg) {
     return <Stack spacing={0.5}><Skeleton width="40%" height={22} /><Skeleton height={6} variant="rounded" /></Stack>;
@@ -135,6 +172,11 @@ function Header({ data, agg, shotCount }: { data?: ProgressData; agg?: Aggregate
       {data.truncated && (
         <Typography variant="caption" color="warning.main">Very large scope: only the first 50,000 tasks are counted.</Typography>
       )}
+      {excludedCount > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          {formatTasks(excludedCount)} not counted ({excluded.join(', ')})
+        </Typography>
+      )}
     </Stack>
   );
 }
@@ -164,8 +206,10 @@ function Body(props: {
   onOpen?: (ref: GroupRef) => void;
   onReload: () => void;
   onChange: (patch: Partial<ViewSettings>) => void;
+  excludedCount: number;
+  onClearExcluded: () => void;
 }) {
-  const { state, entity, view, showShotList, settings, hidden, focusId, onFocus, onOpen, onReload, onChange } = props;
+  const { state, entity, view, showShotList, settings, hidden, focusId, onFocus, onOpen, onReload, onChange, excludedCount, onClearExcluded } = props;
 
   if (!entity) {
     return <EmptyState title="Nothing selected">Open this widget on a project, folder, sequence, shot or list to see its progress.</EmptyState>;
@@ -214,7 +258,13 @@ function Body(props: {
     return (
       <>
         {staleError}
-        <EmptyState title="No tasks here">There are no tasks under this {where}.</EmptyState>
+        {excludedCount > 0 ? (
+          <EmptyState title="Every task is excluded" action={<Button size="small" onClick={onClearExcluded}>Count all statuses</Button>}>
+            All {formatTasks(excludedCount)} here are in statuses you left out of the counts.
+          </EmptyState>
+        ) : (
+          <EmptyState title="No tasks here">There are no tasks under this {where}.</EmptyState>
+        )}
       </>
     );
   }

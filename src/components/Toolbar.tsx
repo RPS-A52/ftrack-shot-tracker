@@ -23,6 +23,8 @@ interface Props {
   hasShotList: boolean;
   loading: boolean;
   onRefresh: () => void;
+  /** The status exclusion drop-down, once there is data to fill it. */
+  filter?: React.ReactNode;
 }
 
 const SORT_LABELS: Record<SortBy, string> = {
@@ -41,7 +43,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function Toolbar({ settings, onChange, hasShotList, loading, onRefresh }: Props) {
+export default function Toolbar({ settings, onChange, hasShotList, loading, onRefresh, filter }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   return (
@@ -66,6 +68,7 @@ export default function Toolbar({ settings, onChange, hasShotList, loading, onRe
         </Tooltip>
       </ToggleButtonGroup>
       <Typography variant="body2" color="text.secondary" noWrap>Tasks by task type</Typography>
+      {filter}
 
       <Box sx={{ flex: 1 }} />
 
