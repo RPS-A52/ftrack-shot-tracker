@@ -2,14 +2,12 @@
 // types as bars or donuts. Virtualised with react-virtuoso: only the cards on screen exist,
 // so projects with hundreds of shots scroll smoothly.
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import {
-  Box, Button, Chip, IconButton, InputAdornment, LinearProgress, Paper, Stack, TextField, Tooltip, Typography,
+  Box, Button, Chip, IconButton, LinearProgress, Paper, Stack, Tooltip, Typography,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import SearchIcon from '@mui/icons-material/Search';
-import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import type { Aggregate, ShotSummary } from '../data/aggregate';
 import { formatCount, formatPercent } from '../data/aggregate';
@@ -21,6 +19,8 @@ import TaskSunburst from './TaskSunburst';
 
 import { slices } from './chartUtils';
 import { useElementSize } from './useElementSize';
+import ShotSearchBar from './ShotSearchBar';
+import { useShotSearch } from './shotSearch';
 
 interface Props {
   shots: ShotSummary[];
@@ -29,6 +29,9 @@ interface Props {
   normalize: boolean;
   hidden: Set<string>;
   onOpen?: (ref: GroupRef) => void;
+  /** Search text; held by App so it survives switching to the timeline and back. */
+  query: string;
+  onQueryChange: (query: string) => void;
 }
 
 const ROW_H = 26;
@@ -36,27 +39,26 @@ const BIG_DONUT = 200;
 
 type Item = { kind: 'all'; agg: Aggregate } | { kind: 'shot'; shot: ShotSummary };
 
-/** Every word typed must appear in the shot or sequence name. */
-function matches(shot: ShotSummary, terms: string[]) {
-  const text = `${shot.ref.name} ${shot.ref.detail ?? ''}`.toLowerCase();
-  return terms.every((t) => text.includes(t));
+/** Shown instead of the list (or the timeline) when a search finds nothing. */
+export function NoMatches({ query, onClear }: { query: string; onClear: () => void }) {
+  return (
+    <Stack spacing={1} alignItems="center" sx={{ p: 4, textAlign: 'center' }}>
+      <Typography variant="subtitle2">No shots match “{query.trim()}”</Typography>
+      <Typography variant="body2" color="text.secondary">Search looks at shot and sequence names.</Typography>
+      <Button size="small" onClick={onClear}>Clear search</Button>
+    </Stack>
+  );
 }
 
-export default function ShotList({ shots, overall, chart, normalize, hidden, onOpen }: Props) {
-  const [query, setQuery] = useState('');
-  // Typing stays responsive with thousands of shots; filtering catches up a frame later.
-  const deferredQuery = useDeferredValue(query);
-  const terms = deferredQuery.trim().toLowerCase().split(/[\s,]+/).filter(Boolean);
+export default function ShotList({ shots, overall, chart, normalize, hidden, onOpen, query, onQueryChange }: Props) {
   const listRef = useRef<VirtuosoHandle>(null);
+  const { filtered, searching, deferredQuery } = useShotSearch(shots, query);
 
-  const filtered = useMemo(() => (terms.length ? shots.filter((s) => matches(s, terms)) : shots),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shots, terms.join(' ')]);
   const items: Item[] = useMemo(() => [
     // The summary card only makes sense for the whole list.
-    ...(terms.length ? [] : [{ kind: 'all', agg: overall } as Item]),
+    ...(searching ? [] : [{ kind: 'all', agg: overall } as Item]),
     ...filtered.map((shot) => ({ kind: 'shot', shot }) as Item),
-  ], [filtered, overall, terms.length]);
+  ], [filtered, overall, searching]);
 
   useEffect(() => { listRef.current?.scrollToIndex({ index: 0 }); }, [deferredQuery]);
 
@@ -66,37 +68,10 @@ export default function ShotList({ shots, overall, chart, normalize, hidden, onO
 
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, py: 1, flexShrink: 0 }}>
-        <TextField
-          size="small"
-          placeholder="Search shots or sequences"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); } }}
-          inputProps={{ 'aria-label': 'Search shots', spellCheck: false }}
-          InputProps={{
-            startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
-            endAdornment: query ? (
-              <InputAdornment position="end">
-                <IconButton size="small" edge="end" aria-label="Clear search" onClick={() => setQuery('')}>
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ) : undefined,
-          }}
-          sx={{ flex: 1, minWidth: 0, maxWidth: 360, '& .MuiInputBase-input': { py: 0.75 } }}
-        />
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-          {terms.length ? `${formatCount(filtered.length)} of ${formatCount(shots.length)} shots` : `${formatCount(shots.length)} shots`}
-        </Typography>
-      </Stack>
+      <ShotSearchBar query={query} onChange={onQueryChange} shown={filtered.length} total={shots.length} searching={searching} />
 
       {items.length === 0 ? (
-        <Stack spacing={1} alignItems="center" sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="subtitle2">No shots match “{deferredQuery.trim()}”</Typography>
-          <Typography variant="body2" color="text.secondary">Search looks at shot and sequence names.</Typography>
-          <Button size="small" onClick={() => setQuery('')}>Clear search</Button>
-        </Stack>
+        <NoMatches query={deferredQuery} onClear={() => onQueryChange('')} />
       ) : (
         <Virtuoso
           ref={listRef}

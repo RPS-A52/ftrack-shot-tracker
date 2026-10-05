@@ -1,26 +1,37 @@
 import '@fontsource/open-sans/400.css';
 import '@fontsource/open-sans/600.css';
-import { useCallback, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import * as ftrackWidget from '@ftrack/web-widget';
 import { Alert, Box, Button, LinearProgress, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import type { QuerySession } from './data/fetchProgress';
 import { UnsupportedScopeError } from './data/fetchProgress';
-import { aggregate, buildSeries, compareNames, formatCount, formatPercent, formatTasks, summariseShots, type Aggregate } from './data/aggregate';
-import type { GroupRef, ProgressData } from './data/types';
+import {
+  aggregate, buildSeries, compareNames, formatCount, formatPercent, formatTasks, STATES, summariseShots, type Aggregate,
+} from './data/aggregate';
+import type { GroupRef, ProgressData, WorkItem } from './data/types';
 import { isBool, oneOf, useFtrackEntity, useProgressData, usePersistentState, type EntityRef, type LoadState } from './hooks';
 import Toolbar, { type ViewSettings } from './components/Toolbar';
 import Legend from './components/Legend';
 import BarView from './components/BarView';
 import PieView from './components/PieView';
 import ShotList from './components/ShotList';
-import StatusFilter, { type StatusOption } from './components/StatusFilter';
+import ExcludeFilter, { type ExcludeOption } from './components/ExcludeFilter';
+// vis-timeline is about as large as the rest of the widget, so it loads only when the
+// timeline is first switched on.
+const TimelineView = lazy(() => import('./components/TimelineView'));
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
+/** Whether a task sits directly in a non-shot folder whose name was excluded. */
+function isInFolder(task: WorkItem, folders: string[]) {
+  return Boolean(task.parent && task.parent.entityType !== 'Shot' && folders.includes(task.parent.name));
+}
+
 const DEFAULTS: ViewSettings = {
   chart: 'bar',
+  timeline: false,
   breakdown: 'status',
   sortBy: 'default',
   normalize: false,
@@ -28,7 +39,9 @@ const DEFAULTS: ViewSettings = {
 const isSettings = (v: unknown): v is ViewSettings => {
   const s = v as ViewSettings;
   return Boolean(s) && oneOf('bar', 'pie')(s.chart) && oneOf('status', 'state')(s.breakdown)
-    && oneOf('default', 'name', 'progress', 'total')(s.sortBy) && isBool(s.normalize);
+    && oneOf('default', 'name', 'progress', 'total')(s.sortBy) && isBool(s.normalize)
+    // Saved before the timeline existed.
+    && (s.timeline === undefined || isBool(s.timeline));
 };
 
 interface Props {
@@ -40,39 +53,68 @@ interface Props {
 export default function App({ session, entity: fixedEntity }: Props) {
   const entity = useFtrackEntity(fixedEntity);
   const [stored, setSettings] = usePersistentState('settings', DEFAULTS, isSettings);
-  // Older saved settings may carry fields this version no longer has.
-  const settings: ViewSettings = { chart: stored.chart, breakdown: stored.breakdown, sortBy: stored.sortBy, normalize: stored.normalize };
+  // Older saved settings may lack newer fields, or carry ones this version no longer has.
+  const settings: ViewSettings = {
+    chart: stored.chart,
+    timeline: stored.timeline ?? false,
+    breakdown: stored.breakdown,
+    sortBy: stored.sortBy,
+    normalize: stored.normalize,
+  };
   const { state, reload } = useProgressData(session, entity);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusId, setFocusId] = useState<string | null>(null);
 
   const [excluded, setExcluded] = usePersistentState('excludedStatuses', [] as string[], isStringArray);
+  // Folders under the shots (e.g. "plates") whose tasks should not count, saved by name.
+  const [excludedFolders, setExcludedFolders] = usePersistentState('excludedFolders', [] as string[], isStringArray);
+  // Shot search, shared by the list and the timeline so it survives switching between them.
+  const [query, setQuery] = useState('');
 
   const data = 'data' in state ? state.data : undefined;
   const { breakdown, sortBy } = settings;
 
+  // Tasks outside excluded folders; the status options and every count start from these.
+  const inFolders = useMemo(() => {
+    if (!data) return [];
+    return excludedFolders.length ? data.tasks.filter((t) => !isInFolder(t, excludedFolders)) : data.tasks;
+  }, [data, excludedFolders]);
+
+  // Every non-shot parent tasks sit under (a plates folder, an asset build...), by name.
+  const folderOptions = useMemo<ExcludeOption[]>(() => {
+    const byName = new Map<string, ExcludeOption>();
+    for (const { parent } of data?.tasks ?? []) {
+      if (!parent || parent.entityType === 'Shot') continue;
+      const entry = byName.get(parent.name) ?? { name: parent.name, kind: parent.entityType, count: 0 };
+      entry.count += 1;
+      byName.set(parent.name, entry);
+    }
+    return [...byName.values()].sort((a, b) => compareNames(a.name, b.name));
+  }, [data]);
+
   // Every status in the scope, in workflow order, with how many tasks are in it.
-  const statusOptions = useMemo<StatusOption[]>(() => {
-    const byName = new Map<string, StatusOption & { sort: number }>();
-    for (const { status } of data?.tasks ?? []) {
+  const statusOptions = useMemo<ExcludeOption[]>(() => {
+    const byName = new Map<string, ExcludeOption & { sort: number }>();
+    for (const { status } of inFolders) {
       const entry = byName.get(status.name) ?? { name: status.name, color: status.color, count: 0, sort: status.sort };
       entry.count += 1;
       byName.set(status.name, entry);
     }
     return [...byName.values()].sort((a, b) => a.sort - b.sort || compareNames(a.name, b.name));
-  }, [data]);
+  }, [inFolders]);
 
   const view = useMemo(() => {
     if (!data) return undefined;
     // Excluded statuses leave the counts entirely, unlike a status hidden from the legend.
-    const counted = excluded.length ? data.tasks.filter((t) => !excluded.includes(t.status.name)) : data.tasks;
+    const counted = excluded.length ? inFolders.filter((t) => !excluded.includes(t.status.name)) : inFolders;
     const series = buildSeries(counted, breakdown);
     return {
       overall: aggregate(counted, series, breakdown),
       shots: summariseShots(counted, series, breakdown, sortBy),
       excludedCount: data.tasks.length - counted.length,
+      counted,
     };
-  }, [data, excluded, breakdown, sortBy]);
+  }, [data, inFolders, excluded, breakdown, sortBy]);
   // A folder, sequence or project with several shots gets the per-shot list.
   const showShotList = Boolean(view && view.shots.length > 1);
 
@@ -91,12 +133,28 @@ export default function App({ session, entity: fixedEntity }: Props) {
   const openInFtrack = fixedEntity
     ? undefined
     : (ref: GroupRef) => { try { ftrackWidget.openSidebar(ref.entityType ?? 'TypedContext', ref.id); } catch (e) { console.error(e); } };
+  const openTask = useMemo(() => (fixedEntity
+    ? undefined
+    : (task: WorkItem) => { try { ftrackWidget.openSidebar('Task', task.id); } catch (e) { console.error(e); } }), [fixedEntity]);
+
+  // The timeline colours and hides bars the way the legend does for the charts.
+  const seriesKeyOf = useCallback((task: WorkItem) => (breakdown === 'state' ? task.status.state : task.status.id), [breakdown]);
+  const colorFor = useCallback((task: WorkItem) => (breakdown === 'state'
+    ? STATES.find((s) => s.key === task.status.state)?.color ?? task.status.color
+    : task.status.color), [breakdown]);
+  const isHidden = useCallback((task: WorkItem) => hidden.has(seriesKeyOf(task)), [hidden, seriesKeyOf]);
 
   return (
     <Box component="main" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary', overflow: 'hidden' }}>
       <Box sx={{ position: 'relative', px: 1.5, pt: 1.25, pb: 1, display: 'flex', flexDirection: 'column', gap: 1, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
         {(data || state.status === 'loading') && (
-          <Header data={data} agg={view?.overall} shotCount={view?.shots.length ?? 0} excluded={excluded} excludedCount={view?.excludedCount ?? 0} />
+          <Header
+            data={data}
+            agg={view?.overall}
+            shotCount={view?.shots.length ?? 0}
+            excluded={[...excludedFolders, ...excluded]}
+            excludedCount={view?.excludedCount ?? 0}
+          />
         )}
         <Toolbar
           settings={settings}
@@ -104,7 +162,26 @@ export default function App({ session, entity: fixedEntity }: Props) {
           hasShotList={showShotList}
           loading={state.status === 'loading'}
           onRefresh={reload}
-          filter={data && <StatusFilter options={statusOptions} excluded={excluded} onChange={setExcluded} />}
+          filter={data && (
+            <>
+              <ExcludeFilter
+                label="Exclude"
+                noun="statuses"
+                hint="Tick statuses to leave out of the counts"
+                options={statusOptions}
+                excluded={excluded}
+                onChange={setExcluded}
+              />
+              <ExcludeFilter
+                label="Exclude folders"
+                noun="folders"
+                hint="Tick folders under the shots (such as plates) to leave their tasks out of the counts. Matched by name, so one tick covers every shot's folder of that name."
+                options={folderOptions}
+                excluded={excludedFolders}
+                onChange={setExcludedFolders}
+              />
+            </>
+          )}
         />
         {view && <Legend agg={view.overall} hidden={hidden} onToggle={toggleSeries} />}
         {state.status === 'loading' && data && (
@@ -126,7 +203,22 @@ export default function App({ session, entity: fixedEntity }: Props) {
           onReload={reload}
           onChange={change}
           excludedCount={view?.excludedCount ?? 0}
-          onClearExcluded={() => setExcluded([])}
+          onClearExcluded={() => { setExcluded([]); setExcludedFolders([]); }}
+          query={query}
+          onQueryChange={setQuery}
+          renderTimeline={() => view && (
+            <Suspense fallback={<LinearProgress sx={{ m: 2 }} />}>
+              <TimelineView
+                shots={view.shots}
+                tasks={view.counted}
+                colorFor={colorFor}
+                isHidden={isHidden}
+                query={query}
+                onQueryChange={setQuery}
+                onOpenTask={openTask}
+              />
+            </Suspense>
+          )}
         />
       </Box>
     </Box>
@@ -208,8 +300,14 @@ function Body(props: {
   onChange: (patch: Partial<ViewSettings>) => void;
   excludedCount: number;
   onClearExcluded: () => void;
+  query: string;
+  onQueryChange: (query: string) => void;
+  renderTimeline: () => React.ReactNode;
 }) {
-  const { state, entity, view, showShotList, settings, hidden, focusId, onFocus, onOpen, onReload, onChange, excludedCount, onClearExcluded } = props;
+  const {
+    state, entity, view, showShotList, settings, hidden, focusId, onFocus, onOpen, onReload, onChange,
+    excludedCount, onClearExcluded, query, onQueryChange, renderTimeline,
+  } = props;
 
   if (!entity) {
     return <EmptyState title="Nothing selected">Open this widget on a project, folder, sequence, shot or list to see its progress.</EmptyState>;
@@ -259,8 +357,8 @@ function Body(props: {
       <>
         {staleError}
         {excludedCount > 0 ? (
-          <EmptyState title="Every task is excluded" action={<Button size="small" onClick={onClearExcluded}>Count all statuses</Button>}>
-            All {formatTasks(excludedCount)} here are in statuses you left out of the counts.
+          <EmptyState title="Every task is excluded" action={<Button size="small" onClick={onClearExcluded}>Clear exclusions</Button>}>
+            All {formatTasks(excludedCount)} here are in statuses or folders you left out of the counts.
           </EmptyState>
         ) : (
           <EmptyState title="No tasks here">There are no tasks under this {where}.</EmptyState>
@@ -272,7 +370,9 @@ function Body(props: {
   return (
     <>
       {staleError}
-      {showShotList ? (
+      {settings.chart === 'bar' && settings.timeline ? (
+        renderTimeline()
+      ) : showShotList ? (
         <ShotList
           shots={view.shots}
           overall={view.overall}
@@ -280,6 +380,8 @@ function Body(props: {
           normalize={settings.normalize}
           hidden={hidden}
           onOpen={onOpen}
+          query={query}
+          onQueryChange={onQueryChange}
         />
       ) : settings.chart === 'bar' ? (
         <BarView

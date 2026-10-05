@@ -17,6 +17,10 @@ export interface WorkItem {
   taskType: GroupRef;
   /** The entity the task is on, normally a shot. */
   parent: GroupRef | null;
+  name: string;
+  /** Scheduled start and due dates as ISO strings, for the timeline; null if not scheduled. */
+  startsAt: string | null;
+  endsAt: string | null;
 }
 
 export interface GroupRef {

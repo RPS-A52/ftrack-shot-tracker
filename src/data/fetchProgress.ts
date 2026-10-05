@@ -23,7 +23,8 @@ const UNSUPPORTED_TYPES = ['AssetVersion', 'AssetVersionList', 'Component', 'Rev
 export class UnsupportedScopeError extends Error {}
 
 const TASK_FIELDS = [
-  'id', 'type.id', 'type.name', 'type.sort',
+  'id', 'name', 'start_date', 'end_date',
+  'type.id', 'type.name', 'type.sort',
   'parent.id', 'parent.name',
   'status.id', 'status.name', 'status.color', 'status.sort', 'status.state.short',
 ];
@@ -95,7 +96,21 @@ function toTask(row: Row, sequences: Map<string, string>): WorkItem {
     parent: parent?.id
       ? { id: parent.id, name: parent.name, detail: sequences.get(parent.id), entityType: parent.__entity_type__ }
       : null,
+    name: row.name ?? type?.name ?? 'Task',
+    startsAt: toIso(row.start_date),
+    endsAt: toIso(row.end_date),
   };
+}
+
+/**
+ * ftrack dates as ISO strings. @ftrack/api decodes them to moment objects unless the session
+ * is created with `decodeDatesAsIso`, and the mock session sends strings; accept both.
+ */
+function toIso(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return Number.isNaN(Date.parse(value)) ? null : value;
+  const date = value as { toISOString?: () => string };
+  return typeof date.toISOString === 'function' ? date.toISOString() : null;
 }
 
 /**
