@@ -211,6 +211,57 @@ export default function TimelineView({ shots, tasks, colorFor, isHidden, query, 
     };
   }, []);
 
+  /**
+   * Finish a drag whose release happened outside the widget.
+   *
+   * The pan gesture (Hammer.js inside vis-timeline) waits for a `pointerup` on this window.
+   * Released outside the browser, or just outside the ftrack iframe, that event never comes,
+   * and focus often does not change either, so the view keeps following the mouse when it
+   * returns. Two things tell us the button is already up: a move with no button held, or the
+   * window losing focus. Either way a release is replayed with the *same pointer id* as the
+   * press (Hammer matches the release to the press by id and ignores any other), and from
+   * the capture phase, so it lands before the library treats that move as more panning.
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let press: { pointerId: number; pointerType: string; isPrimary: boolean } | null = null;
+
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      press = { pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary };
+    };
+    const release = (at?: { clientX: number; clientY: number }) => {
+      if (!press) return;
+      const target = container.querySelector('.vis-panel.vis-center') ?? container;
+      const init = { ...press, ...at, bubbles: true, cancelable: true, button: 0, buttons: 0 };
+      press = null;
+      target.dispatchEvent(new PointerEvent('pointerup', init));
+    };
+    const onMove = (event: PointerEvent) => {
+      if (press && event.pointerId === press.pointerId && (event.buttons & 1) === 0) {
+        release({ clientX: event.clientX, clientY: event.clientY });
+      }
+    };
+    const onEnd = (event: PointerEvent) => {
+      if (press && event.pointerId === press.pointerId) press = null;
+    };
+    const onBlur = () => release();
+
+    container.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onEnd, true);
+    window.addEventListener('pointercancel', onEnd, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      container.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onEnd, true);
+      window.removeEventListener('pointercancel', onEnd, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
