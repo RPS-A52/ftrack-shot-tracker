@@ -7,10 +7,13 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import DonutLargeIcon from '@mui/icons-material/DonutLarge';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TuneIcon from '@mui/icons-material/Tune';
+import ViewTimelineIcon from '@mui/icons-material/ViewTimeline';
 import type { Breakdown, ChartKind, SortBy } from '../data/types';
 
 export interface ViewSettings {
   chart: ChartKind;
+  /** Bar mode shows the shot timeline instead of the bars. */
+  timeline: boolean;
   breakdown: Breakdown;
   sortBy: SortBy;
   normalize: boolean;
@@ -67,6 +70,22 @@ export default function Toolbar({ settings, onChange, hasShotList, loading, onRe
           </ToggleButton>
         </Tooltip>
       </ToggleButtonGroup>
+      {/* Bar mode only: swaps the bars for the shot timeline. */}
+      {settings.chart === 'bar' && (
+        <Tooltip title={settings.timeline ? 'Hide timeline' : 'Show tasks on a timeline'}>
+          <ToggleButton
+            size="small"
+            value="timeline"
+            selected={settings.timeline}
+            onChange={() => onChange({ timeline: !settings.timeline })}
+            aria-label="Timeline"
+            sx={{ gap: 0.75, px: 1.25 }}
+          >
+            <ViewTimelineIcon fontSize="small" />
+            Timeline
+          </ToggleButton>
+        </Tooltip>
+      )}
       <Typography variant="body2" color="text.secondary" noWrap>Tasks by task type</Typography>
       {filter}
 
@@ -112,7 +131,7 @@ export default function Toolbar({ settings, onChange, hasShotList, loading, onRe
           </Section>
           <Divider />
           <FormControlLabel
-            disabled={settings.chart !== 'bar'}
+            disabled={settings.chart !== 'bar' || settings.timeline}
             control={<Switch size="small" checked={settings.normalize} onChange={(e) => onChange({ normalize: e.target.checked })} />}
             label={<Typography variant="body2">Bars as 100%</Typography>}
           />

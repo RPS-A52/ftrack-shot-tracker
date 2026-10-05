@@ -16,6 +16,7 @@ const OMITTED = { id: 's-omit', name: 'Omitted', color: '#5c6370', sort: 5, stat
 // In workflow order, the way ftrack's task type `sort` puts them.
 const TASK_TYPES = ['Tracking', 'Modeling', 'Rigging', 'Animation', 'FX', 'Lighting', 'Compositing']
   .map((name, sort) => ({ id: `tt-${sort}`, name, sort }));
+const PLATE_TYPES = [{ id: 'tt-plate', name: 'Plate prep', sort: -2 }, { id: 'tt-roto', name: 'Roto', sort: -1 }];
 
 /** Deterministic pseudo-random numbers, so reloads show the same project. */
 function rng(seed: number) {
@@ -44,8 +45,38 @@ function build(shotCount: number) {
       const status = rand() < 0.08 ? OMITTED
         : roll > 0.75 ? STATUSES[4] : roll > 0.6 ? STATUSES[2] : roll > 0.4 ? STATUSES[1]
           : roll > 0.35 ? STATUSES[3] : STATUSES[0];
-      tasks.push({ id: `task-${i}-${type.id}`, type, parent: shot, status });
+      // Departments follow one another through each shot, starting a few weeks back; a few
+      // tasks have no dates, as unscheduled work does.
+      const day = 24 * 60 * 60 * 1000;
+      const start = Date.now() - 45 * day + i * 2 * day + type.sort * 6 * day + Math.round(rand() * 3) * day;
+      const scheduled = rand() > 0.08;
+      tasks.push({
+        id: `task-${i}-${type.id}`,
+        name: `${shot.name}_${type.name.toLowerCase()}`,
+        type,
+        parent: shot,
+        status,
+        start_date: scheduled ? new Date(start).toISOString() : null,
+        end_date: scheduled ? new Date(start + (3 + Math.round(rand() * 8)) * day).toISOString() : null,
+      });
     });
+    // Many shots have a plates folder with its own prep tasks, which the studio leaves out.
+    if (rand() < 0.6) {
+      const plates = { id: `plates-${i}`, name: 'plates', __entity_type__: 'Folder' };
+      contexts.push({ id: plates.id, link: [project, seq, shot, plates] });
+      PLATE_TYPES.forEach((type) => {
+        const start = Date.now() - 50 * 86_400_000 + i * 2 * 86_400_000;
+        tasks.push({
+          id: `task-${i}-${type.id}`,
+          name: `${shot.name}_${type.name.toLowerCase().replace(' ', '_')}`,
+          type,
+          parent: plates,
+          status: rand() < 0.5 ? STATUSES[4] : STATUSES[0],
+          start_date: new Date(start).toISOString(),
+          end_date: new Date(start + 4 * 86_400_000).toISOString(),
+        });
+      });
+    }
   }
   return { project, tasks, contexts };
 }
@@ -71,7 +102,8 @@ export function createMockSession(): QuerySession {
       if (/from TypedContext /.test(expression)) return page(db.contexts);
       if (/from Task /.test(expression)) {
         const rows = shotId && !/ in \(/.test(expression)
-          ? db.tasks.filter((t) => (t.parent as { id: string }).id === shotId)
+          // Everything under the shot, its plates folder included, as `ancestors.id` matches.
+          ? db.tasks.filter((t) => [shotId, shotId.replace('shot-', 'plates-')].includes((t.parent as { id: string }).id))
           : db.tasks;
         return page(rows);
       }

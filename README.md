@@ -10,7 +10,31 @@ sequence, shot or list, by task type and status, as stacked bars or donuts.
   word must match; Esc clears). The list is virtualised with
   [react-virtuoso](https://virtuoso.dev/), so only the cards on screen are rendered.
 - **One shot**: its task types full size. In bar mode, click a row to open its donut.
+- **Timeline** (bar mode only, toggled in the toolbar): one lane per shot with each task drawn
+  from its start to its due date in its status colour, like ftrack-timeline-viewer but by shot
+  rather than by artist. Shot search, status exclusion and legend hiding apply to it. Zoom with
+  the Days / Weeks / Months / Year levels (14, 28, 120 and 365 days, starting three days before
+  today when today is on screen), the zoom buttons or ctrl-scroll; step a view's width with
+  ‹ › and jump back with Today; Fit frames every scheduled task. Shift-scroll moves through
+  time. Clicking a task opens it in ftrack's sidebar. Tasks without both dates are counted in
+  the charts but listed as not shown. Built on
+  [vis-timeline](https://visjs.github.io/vis-timeline/), loaded only when the timeline is first
+  switched on.
+- **Studio time**: the timeline reads every date in the studio's timezone, so a task lands on
+  the same day for every viewer wherever they are, and the today line, hover-card times and
+  working-day counts match ftrack's own popover. `src/data/dates.ts` is ported from
+  ftrack-timeline-viewer. Set the zone with `VITE_STUDIO_TIME_ZONE` (an IANA name, e.g.
+  `America/Los_Angeles`, the default) in `.env`; see `.env.example`. ftrack does not expose it
+  through the API, and an unknown name fails loudly rather than falling back to the viewer's
+  zone.
 - **Task types** are in workflow order (their ftrack sort), not alphabetical.
+- **Exclude** (toolbar drop-downs): leave tasks out of every count, unlike the legend, which
+  only hides a status from the charts. *Exclude* takes statuses (e.g. Omitted); *Exclude
+  folders* takes the non-shot entities tasks sit in directly (e.g. each shot's `plates`
+  folder), matched by name so one tick covers every shot's folder of that name. Without it,
+  such a folder shows up as a card of its own. Only a task's direct parent is matched; tasks in
+  a subfolder of `plates` list that subfolder separately. Both are remembered per browser, and
+  the header says how many tasks were left out.
 - **Colour by**: each workflow status in its ftrack colour, or the four states (not started,
   in progress, blocked, done).
 - **Progress** is the share of tasks whose status is in the *Done* state.
