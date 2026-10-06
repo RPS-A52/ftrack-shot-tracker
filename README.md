@@ -28,13 +28,20 @@ sequence, shot or list, by task type and status, as stacked bars or donuts.
   through the API, and an unknown name fails loudly rather than falling back to the viewer's
   zone.
 - **Task types** are in workflow order (their ftrack sort), not alphabetical.
-- **Exclude** (toolbar drop-downs): leave tasks out of every count, unlike the legend, which
-  only hides a status from the charts. *Exclude* takes statuses (e.g. Omitted); *Exclude
-  folders* takes the non-shot entities tasks sit in directly (e.g. each shot's `plates`
-  folder), matched by name so one tick covers every shot's folder of that name. Without it,
-  such a folder shows up as a card of its own. Only a task's direct parent is matched; tasks in
-  a subfolder of `plates` list that subfolder separately. Both are remembered per browser, and
-  the header says how many tasks were left out.
+- **Exclude** (one toolbar drop-down): leave tasks out of every count, unlike the legend, which
+  only hides a status from the charts. Its three sections apply from the parent down, and each
+  counts only what is still in after the sections above it:
+  1. *Shots by status* (e.g. Omitted, On hold) drops those shots entirely, with every task
+     under them, folders included. A task's shot is its parent, or the nearest shot above it
+     (from `link`), so tasks in `sh010/plates` follow sh010's status. Counts are shots.
+  2. *Folders* drops the non-shot entities tasks sit in directly (e.g. each shot's `plates`
+     folder), matched by name so one tick covers every shot's folder of that name. Without it,
+     such a folder shows up as a card of its own. Only a task's direct parent is matched;
+     tasks in a subfolder of `plates` list that subfolder separately.
+  3. *Tasks by status* (e.g. Omitted) drops the remaining tasks in those statuses.
+
+  The button shows "None", the one name excluded, or "3 types". Everything is matched by
+  name and remembered per browser, and the header says how many tasks were left out and why.
 - **Colour by**: each workflow status in its ftrack colour, or the four states (not started,
   in progress, blocked, done).
 - **Progress** is the share of tasks whose status is in the *Done* state.

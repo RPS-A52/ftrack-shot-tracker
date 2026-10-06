@@ -17,6 +17,9 @@ export interface WorkItem {
   taskType: GroupRef;
   /** The entity the task is on, normally a shot. */
   parent: GroupRef | null;
+  /** The shot the task belongs to (its parent, or the shot above its folder), and its status. */
+  shotId: string | null;
+  shotStatus: StatusInfo | null;
   name: string;
   /** Scheduled start and due dates as ISO strings, for the timeline; null if not scheduled. */
   startsAt: string | null;
