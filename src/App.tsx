@@ -68,31 +68,56 @@ export default function App({ session, entity: fixedEntity }: Props) {
   const [excluded, setExcluded] = usePersistentState('excludedStatuses', [] as string[], isStringArray);
   // Folders under the shots (e.g. "plates") whose tasks should not count, saved by name.
   const [excludedFolders, setExcludedFolders] = usePersistentState('excludedFolders', [] as string[], isStringArray);
+  // Shot statuses (e.g. "Omitted") whose shots should not count at all, saved by name.
+  const [excludedShotStatuses, setExcludedShotStatuses] = usePersistentState('excludedShotStatuses', [] as string[], isStringArray);
   // Shot search, shared by the list and the timeline so it survives switching between them.
   const [query, setQuery] = useState('');
 
   const data = 'data' in state ? state.data : undefined;
   const { breakdown, sortBy } = settings;
 
-  // Tasks outside excluded folders; the status options and every count start from these.
-  const inFolders = useMemo(() => {
+  // Exclusions apply from the parent down: shots by status first (with everything under them),
+  // then folders, then task statuses on what is left. Each menu section counts what is still
+  // in after the sections above it.
+  const inShots = useMemo(() => {
     if (!data) return [];
-    return excludedFolders.length ? data.tasks.filter((t) => !isInFolder(t, excludedFolders)) : data.tasks;
-  }, [data, excludedFolders]);
+    if (!excludedShotStatuses.length) return data.tasks;
+    return data.tasks.filter((t) => !(t.shotStatus && excludedShotStatuses.includes(t.shotStatus.name)));
+  }, [data, excludedShotStatuses]);
+  const inFolders = useMemo(
+    () => (excludedFolders.length ? inShots.filter((t) => !isInFolder(t, excludedFolders)) : inShots),
+    [inShots, excludedFolders],
+  );
 
-  // Every non-shot parent tasks sit under (a plates folder, an asset build...), by name.
+  // Every shot status in the scope, in workflow order, with how many shots are in it.
+  const shotStatusOptions = useMemo<ExcludeOption[]>(() => {
+    const byName = new Map<string, ExcludeOption & { sort: number; shots: Set<string> }>();
+    for (const { shotId, shotStatus } of data?.tasks ?? []) {
+      if (!shotId || !shotStatus) continue;
+      const entry = byName.get(shotStatus.name)
+        ?? { name: shotStatus.name, color: shotStatus.color, count: 0, sort: shotStatus.sort, shots: new Set<string>() };
+      entry.shots.add(shotId);
+      entry.count = entry.shots.size;
+      byName.set(shotStatus.name, entry);
+    }
+    return [...byName.values()]
+      .sort((a, b) => a.sort - b.sort || compareNames(a.name, b.name))
+      .map(({ name, color, count }) => ({ name, color, count }));
+  }, [data]);
+
+  // Every non-shot parent the remaining tasks sit under (a plates folder...), by name.
   const folderOptions = useMemo<ExcludeOption[]>(() => {
     const byName = new Map<string, ExcludeOption>();
-    for (const { parent } of data?.tasks ?? []) {
+    for (const { parent } of inShots) {
       if (!parent || parent.entityType === 'Shot') continue;
       const entry = byName.get(parent.name) ?? { name: parent.name, kind: parent.entityType, count: 0 };
       entry.count += 1;
       byName.set(parent.name, entry);
     }
     return [...byName.values()].sort((a, b) => compareNames(a.name, b.name));
-  }, [data]);
+  }, [inShots]);
 
-  // Every status in the scope, in workflow order, with how many tasks are in it.
+  // Every task status left, in workflow order, with how many tasks are in it.
   const statusOptions = useMemo<ExcludeOption[]>(() => {
     const byName = new Map<string, ExcludeOption & { sort: number }>();
     for (const { status } of inFolders) {
@@ -152,7 +177,11 @@ export default function App({ session, entity: fixedEntity }: Props) {
             data={data}
             agg={view?.overall}
             shotCount={view?.shots.length ?? 0}
-            excluded={[...excludedFolders, ...excluded]}
+            excluded={[
+              excludedShotStatuses.length && `shots: ${excludedShotStatuses.join(', ')}`,
+              excludedFolders.length && `folders: ${excludedFolders.join(', ')}`,
+              excluded.length && `tasks: ${excluded.join(', ')}`,
+            ].filter(Boolean).join(' · ')}
             excludedCount={view?.excludedCount ?? 0}
           />
         )}
@@ -163,24 +192,22 @@ export default function App({ session, entity: fixedEntity }: Props) {
           loading={state.status === 'loading'}
           onRefresh={reload}
           filter={data && (
-            <>
-              <ExcludeFilter
-                label="Exclude"
-                noun="statuses"
-                hint="Tick statuses to leave out of the counts"
-                options={statusOptions}
-                excluded={excluded}
-                onChange={setExcluded}
-              />
-              <ExcludeFilter
-                label="Exclude folders"
-                noun="folders"
-                hint="Tick folders under the shots (such as plates) to leave their tasks out of the counts. Matched by name, so one tick covers every shot's folder of that name."
-                options={folderOptions}
-                excluded={excludedFolders}
-                onChange={setExcludedFolders}
-              />
-            </>
+            <ExcludeFilter
+              sections={[
+                {
+                  key: 'shot', title: 'Shots by status', counts: 'shots',
+                  options: shotStatusOptions, excluded: excludedShotStatuses, onChange: setExcludedShotStatuses,
+                },
+                {
+                  key: 'folder', title: 'Folders', counts: 'tasks',
+                  options: folderOptions, excluded: excludedFolders, onChange: setExcludedFolders,
+                },
+                {
+                  key: 'task', title: 'Tasks by status', counts: 'tasks',
+                  options: statusOptions, excluded, onChange: setExcluded,
+                },
+              ]}
+            />
           )}
         />
         {view && <Legend agg={view.overall} hidden={hidden} onToggle={toggleSeries} />}
@@ -203,7 +230,7 @@ export default function App({ session, entity: fixedEntity }: Props) {
           onReload={reload}
           onChange={change}
           excludedCount={view?.excludedCount ?? 0}
-          onClearExcluded={() => { setExcluded([]); setExcludedFolders([]); }}
+          onClearExcluded={() => { setExcluded([]); setExcludedFolders([]); setExcludedShotStatuses([]); }}
           query={query}
           onQueryChange={setQuery}
           renderTimeline={() => view && (
@@ -229,7 +256,8 @@ function Header({ data, agg, shotCount, excluded, excludedCount }: {
   data?: ProgressData;
   agg?: Aggregate;
   shotCount: number;
-  excluded: string[];
+  /** What was excluded, already worded: "shots: Omitted · folders: plates". */
+  excluded: string;
   excludedCount: number;
 }) {
   const theme = useTheme();
@@ -266,7 +294,7 @@ function Header({ data, agg, shotCount, excluded, excludedCount }: {
       )}
       {excludedCount > 0 && (
         <Typography variant="caption" color="text.secondary">
-          {formatTasks(excludedCount)} not counted ({excluded.join(', ')})
+          {formatTasks(excludedCount)} not counted ({excluded})
         </Typography>
       )}
     </Stack>
@@ -358,7 +386,7 @@ function Body(props: {
         {staleError}
         {excludedCount > 0 ? (
           <EmptyState title="Every task is excluded" action={<Button size="small" onClick={onClearExcluded}>Clear exclusions</Button>}>
-            All {formatTasks(excludedCount)} here are in statuses or folders you left out of the counts.
+            All {formatTasks(excludedCount)} here are in shots, folders or statuses you left out of the counts.
           </EmptyState>
         ) : (
           <EmptyState title="No tasks here">There are no tasks under this {where}.</EmptyState>

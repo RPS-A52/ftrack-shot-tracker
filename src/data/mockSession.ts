@@ -17,6 +17,18 @@ const OMITTED = { id: 's-omit', name: 'Omitted', color: '#5c6370', sort: 5, stat
 const TASK_TYPES = ['Tracking', 'Modeling', 'Rigging', 'Animation', 'FX', 'Lighting', 'Compositing']
   .map((name, sort) => ({ id: `tt-${sort}`, name, sort }));
 const PLATE_TYPES = [{ id: 'tt-plate', name: 'Plate prep', sort: -2 }, { id: 'tt-roto', name: 'Roto', sort: -1 }];
+// Shot statuses: most shots in progress, a few on hold or omitted, the first few approved.
+const SHOT_STATUSES = {
+  progress: { id: 'ss-ip', name: 'In progress', color: '#4f97d8', sort: 1, state: { short: 'IN_PROGRESS' } },
+  hold: { id: 'ss-hold', name: 'On hold', color: '#e8b04b', sort: 2, state: { short: 'BLOCKED' } },
+  omitted: { id: 'ss-omit', name: 'Omitted', color: '#5c6370', sort: 3, state: { short: 'BLOCKED' } },
+  approved: { id: 'ss-app', name: 'Approved', color: '#56b98e', sort: 4, state: { short: 'DONE' } },
+};
+function shotStatusFor(i: number) {
+  if (i % 10 === 7) return SHOT_STATUSES.omitted;
+  if (i % 10 === 3) return SHOT_STATUSES.hold;
+  return i < 3 ? SHOT_STATUSES.approved : SHOT_STATUSES.progress;
+}
 
 /** Deterministic pseudo-random numbers, so reloads show the same project. */
 function rng(seed: number) {
@@ -31,11 +43,13 @@ function build(shotCount: number) {
   const project = { id: 'mock-project', name: 'Demo project', __entity_type__: 'Project' };
   const tasks: Record<string, unknown>[] = [];
   const contexts: Record<string, unknown>[] = [];
+  const shots: Record<string, unknown>[] = [];
   for (let i = 0; i < shotCount; i++) {
     const seq = { id: `seq-${Math.floor(i / 8)}`, name: `sq${String(Math.floor(i / 8) + 1).padStart(3, '0')}` };
     // Shot names repeat across sequences, as happens in real projects.
     const shot = { id: `shot-${i}`, name: `sh${String(((i % 8) + 1) * 10).padStart(4, '0')}`, __entity_type__: 'Shot' };
     contexts.push({ id: shot.id, link: [project, seq, shot] });
+    shots.push({ id: shot.id, status: shotStatusFor(i) });
     // Earlier shots are further along, and tasks run down the pipeline: early departments
     // finish first.
     const maturity = 1 - i / Math.max(shotCount, 1);
@@ -78,7 +92,7 @@ function build(shotCount: number) {
       });
     }
   }
-  return { project, tasks, contexts };
+  return { project, tasks, contexts, shots };
 }
 
 export function createMockSession(): QuerySession {
@@ -100,6 +114,7 @@ export function createMockSession(): QuerySession {
         return { data: [shot ? { name: shot.link[shot.link.length - 1].name } : db.project] };
       }
       if (/from TypedContext /.test(expression)) return page(db.contexts);
+      if (/from Shot /.test(expression)) return page(db.shots);
       if (/from Task /.test(expression)) {
         const rows = shotId && !/ in \(/.test(expression)
           // Everything under the shot, its plates folder included, as `ancestors.id` matches.

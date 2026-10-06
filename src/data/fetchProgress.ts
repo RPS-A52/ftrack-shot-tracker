@@ -84,9 +84,13 @@ function toStatus(status: Row | null | undefined): StatusInfo {
   };
 }
 
-function toTask(row: Row, sequences: Map<string, string>): WorkItem {
+function toTask(row: Row, parents: Map<string, ParentInfo>, shotStatuses: Map<string, StatusInfo>): WorkItem {
   const type = row.type;
   const parent = row.parent;
+  const info = parent?.id ? parents.get(parent.id) : undefined;
+  // The task's shot: its parent if that is a shot, else the nearest shot above it (a task in
+  // sh010/plates belongs to sh010).
+  const shotId = parent?.id && shotStatuses.has(parent.id) ? parent.id : info?.chain.find((id) => shotStatuses.has(id));
   return {
     id: row.id,
     status: toStatus(row.status),
@@ -94,14 +98,15 @@ function toTask(row: Row, sequences: Map<string, string>): WorkItem {
       ? { id: type.id, name: type.name, sort: Number(type.sort ?? 0) }
       : { id: '__none__', name: 'No task type', sort: Number.MAX_SAFE_INTEGER },
     parent: parent?.id
-      ? { id: parent.id, name: parent.name, detail: sequences.get(parent.id), entityType: parent.__entity_type__ }
+      ? { id: parent.id, name: parent.name, detail: info?.above, entityType: parent.__entity_type__ }
       : null,
+    shotId: shotId ?? null,
+    shotStatus: shotId ? shotStatuses.get(shotId) ?? null : null,
     name: row.name ?? type?.name ?? 'Task',
     startsAt: toIso(row.start_date),
     endsAt: toIso(row.end_date),
   };
 }
-
 /**
  * ftrack dates as ISO strings. @ftrack/api decodes them to moment objects unless the session
  * is created with `decodeDatesAsIso`, and the mock session sends strings; accept both.
@@ -113,26 +118,52 @@ function toIso(value: unknown): string | null {
   return typeof date.toISOString === 'function' ? date.toISOString() : null;
 }
 
+interface ParentInfo {
+  /** Name of the entity above (usually the sequence), to tell apart shots with one name. */
+  above?: string;
+  /** Ids of the entities above, nearest first, for finding a task's shot. */
+  chain: string[];
+}
+
 /**
- * Name of the entity above each shot (usually its sequence), to tell apart shots that share
- * a name. Best effort: without it the list just shows bare shot names.
+ * Where each task parent sits, from its `link` (the path from the project down to it).
+ * Best effort: without it the list shows bare shot names and shot statuses are unknown.
  */
-async function loadParentNames(session: QuerySession, ids: string[]) {
-  const names = new Map<string, string>();
+async function loadParents(session: QuerySession, ids: string[]) {
+  const parents = new Map<string, ParentInfo>();
   try {
     const { rows } = await queryAllIn(session, 'TypedContext', ['id', 'link'], ids, (list) => `id in (${list})`);
     for (const row of rows) {
-      // `link` runs from the project down to the entity itself: [..., sequence, shot].
+      // [project, ..., sequence, shot, (folder)]: everything but the entity itself and the project.
       const link: Row[] = Array.isArray(row.link) ? row.link : [];
       const above = link.length >= 2 ? link[link.length - 2] : undefined;
-      if (above?.name) names.set(row.id, above.name);
+      parents.set(row.id, {
+        above: above?.name,
+        chain: link.slice(1, -1).map((entry) => String(entry.id)).reverse(),
+      });
     }
   } catch (error) {
-    console.warn('Could not load sequence names', error);
+    console.warn('Could not load parent paths', error);
   }
-  return names;
+  return parents;
 }
 
+/**
+ * The status of every shot among `ids`, for excluding shots by status. Ids that are not shots
+ * (folders, sequences) simply do not come back. Best effort, as studios without a Shot type
+ * would otherwise lose the whole widget.
+ */
+async function loadShotStatuses(session: QuerySession, ids: string[]) {
+  const statuses = new Map<string, StatusInfo>();
+  try {
+    const fields = ['id', 'status.id', 'status.name', 'status.color', 'status.sort', 'status.state.short'];
+    const { rows } = await queryAllIn(session, 'Shot', fields, ids, (list) => `id in (${list})`);
+    for (const row of rows) statuses.set(String(row.id), toStatus(row.status));
+  } catch (error) {
+    console.warn('Could not load shot statuses', error);
+  }
+  return statuses;
+}
 async function loadScope(session: QuerySession, id: string, type: string): Promise<Scope> {
   const from = LIST_TYPES.includes(type) ? type : 'Context';
   try {
@@ -156,7 +187,7 @@ async function queryTasks(session: QuerySession, entity: { id: string; type: str
   return queryAll(session, 'Task', TASK_FIELDS, `(id is ${id} or ancestors.id is ${id})`);
 }
 
-/** Every task under the entity, with the status each one is in. */
+/** Every task under the entity, with the status each one (and its shot) is in. */
 export async function fetchProgress(session: QuerySession, entity: { id: string; type: string }): Promise<ProgressData> {
   if (UNSUPPORTED_TYPES.includes(entity.type)) {
     throw new UnsupportedScopeError(`This widget summarises the tasks under a project, folder, sequence, shot or list. It can't be used on a ${entity.type}.`);
@@ -166,10 +197,14 @@ export async function fetchProgress(session: QuerySession, entity: { id: string;
     queryTasks(session, entity),
   ]);
   const parentIds = [...new Set(result.rows.map((r) => r.parent?.id).filter(Boolean) as string[])];
-  const sequences = await loadParentNames(session, parentIds);
+  const parents = await loadParents(session, parentIds);
+  // Any parent, or anything above one, may be a shot.
+  const candidates = new Set(parentIds);
+  for (const info of parents.values()) info.chain.forEach((id) => candidates.add(id));
+  const shotStatuses = await loadShotStatuses(session, [...candidates]);
   return {
     scope,
-    tasks: result.rows.map((row) => toTask(row, sequences)),
+    tasks: result.rows.map((row) => toTask(row, parents, shotStatuses)),
     truncated: result.truncated,
   };
 }
